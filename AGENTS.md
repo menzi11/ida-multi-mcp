@@ -1,6 +1,6 @@
 # AGENTS
 
-Last updated: 2026-02-17
+Last updated: 2026-07-12
 
 ## 1) Entry Rules
 - Read order: `docs/README.md` -> `docs/.ssot/PRD.md` -> `docs/.ssot/contracts/*` -> target domain docs.
@@ -21,3 +21,9 @@ Last updated: 2026-02-17
 - No DB-backed schema docs
 - Uses AI agents
 - Does not use RAG KB currently
+
+## 5) MCP Agent Guide
+- Tool selection: `docs/ops/mcp-tool-selection.md`
+- Deployment check: call `server_info` (Router) and `server_health` (per instance); compare `build_id` / `capabilities`.
+- Project skill (optional): `.cursor/skills/ida-multi-mcp/SKILL.md`
+- Windows: install the package for **both** Router Python and IDA's Python (see `docs/installation.md`).

@@ -2,7 +2,7 @@
 
 This guide is for AI agents. Follow each step exactly.
 
-Last updated: 2026-02-17
+Last updated: 2026-07-12
 Governance reference: `docs/README.md`
 Authority note: this document is operational guidance and must not redefine contracts.
 
@@ -120,24 +120,38 @@ python3.11 -m ida_multi_mcp --install
 
 ### Windows
 
-```bash
+```powershell
 # 0. (Recommended) Clean previous install to avoid stale scripts/config
 ida-multi-mcp --uninstall
 python -m pip uninstall -y ida-multi-mcp
 
-# 1. Install ida-multi-mcp
-python -m pip install git+https://github.com/MeroZemory/ida-multi-mcp.git
+# 1. Install for the Router / MCP client Python (terminal default)
+python -m pip install -e .   # or: pip install git+https://github.com/...
 
-# 2. Install IDA plugin + configure all MCP clients
+# 2. Install IDA plugin + configure MCP clients
 ida-multi-mcp --install
 ```
 
-On Windows, IDA typically uses the system Python or its bundled Python. If using IDA's bundled Python, install to the matching version:
+**Important:** IDA Pro uses its **own** Python interpreter (shown in the IDA Output window on startup, e.g. `Python 3.11.9`). The Router and the IDA plugin are separate processes — **both** must have `ida-multi-mcp` installed.
 
-```bash
-# If IDA uses Python 3.12 but your system default is different:
-py -3.12 -m pip install git+https://github.com/MeroZemory/ida-multi-mcp.git
+For local development from a clone:
+
+```powershell
+# Router (same Python as in ~/.cursor/mcp.json, e.g. Python 3.14)
+pip install -e .
+
+# IDA plugin (path varies; common on Windows):
+& "$env:APPDATA\IDA Pro\python311\python.exe" -m pip install -e .
 ```
+
+Find IDA's Python in the Output window (`Python X.Y.Z`) or from a failed plugin load message (`Searched paths:`). Then:
+
+```powershell
+# If IDA uses 3.12 but your terminal default is 3.14:
+py -3.12 -m pip install -e .
+```
+
+After any upgrade: **restart Cursor MCP** and **restart IDA**. Confirm with `server_info` (Router) and `server_health` (instance) — `build.build_id` should match.
 
 If IDA is installed in a custom location:
 ```bash

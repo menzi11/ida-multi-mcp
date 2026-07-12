@@ -18,6 +18,7 @@ Based on MCP usage analysis and design review. Phased delivery.
 | 0c | Default pseudocode cap 600 lines; `max_pseudocode_lines=0` = full text (server cache) | Done |
 | 0d | `scripts/generate_tool_schemas.py` + CI drift check | Done |
 | 0e | Promote `analyze_batch` / `insn_query` in tool descriptions | Done |
+| 0f | `server_info` + `server_health.build` deployment probe | Done |
 
 **Acceptance:** `analyze_function` schema validation failures → 0; `constants` non-empty on functions with large immediates; schemas CI-aligned.
 

@@ -90,4 +90,17 @@ python scripts/generate_tool_schemas.py
 python scripts/generate_tool_schemas.py --check   # CI
 ```
 
+**Install / upgrade (two runtimes on Windows):**
+
+```powershell
+# Router (MCP client / terminal Python)
+pip install -e .
+
+# IDA plugin (check Output window for version, often python311)
+& "$env:APPDATA\IDA Pro\python311\python.exe" -m pip install -e .
+ida-multi-mcp --install
+```
+
+Restart Cursor MCP and restart IDA after upgrades. Verify with `server_info` and `server_health` (`build_id` / `capabilities`).
+
 Reload the IDA plugin so running instances expose new tools, then call `refresh_tools`.

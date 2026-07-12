@@ -1685,9 +1685,9 @@ def insn_query(
                 results.append({"pattern": pattern, "error": range_error, "matches": []})
                 continue
 
-            matched_addrs, more, scanned, capped, total = _scan_insn_ranges(
+            matched_addrs, more, scanned, truncated, _next_start = _scan_insn_ranges(
                 ranges, mnem, op0, op1, op2, op_any,
-                count=count, offset=offset, max_scan_insns=500_000,
+                limit=count, offset=offset, max_scan_insns=500_000,
             )
 
             matches = []
@@ -1705,6 +1705,7 @@ def insn_query(
                 "count": len(matches),
                 "more": more,
                 "scanned": scanned,
+                "truncated": truncated,
             })
         except Exception as e:
             results.append({"pattern": pattern, "error": str(e), "matches": []})
