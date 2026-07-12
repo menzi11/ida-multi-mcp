@@ -1,4 +1,4 @@
-# Vendored zeromcp for the router (stdio transport, IDA-free).
+﻿# Vendored zeromcp for the router (stdio transport, IDA-free).
 #
 # A second copy lives at ida_multi_mcp/ida_mcp/zeromcp/mcp.py and is used by the
 # IDA plugin/worker over HTTP. The two are deliberately separate: the router
@@ -21,6 +21,10 @@ from urllib.parse import urlparse, parse_qs
 from io import BufferedIOBase
 
 from .jsonrpc import JsonRpcRegistry, JsonRpcError, JsonRpcException, get_current_request_id, register_pending_request, unregister_pending_request, cancel_request
+
+def _doc_description(doc: str | None, fallback: str) -> str:
+    """Normalize docstrings for stable MCP schemas across Python versions."""
+    return inspect.cleandoc(doc) if doc else fallback
 
 class McpToolError(Exception):
     def __init__(self, message: str):
@@ -577,7 +581,7 @@ class McpServer:
             resources.append({
                 "uri": uri,
                 "name": func_name,
-                "description": (func.__doc__ or f"Read {uri}").strip(),
+                "description": _doc_description(func.__doc__, f"Read {uri}"),
                 "mimeType": "application/json",
             })
 
@@ -596,7 +600,7 @@ class McpServer:
             templates.append({
                 "uriTemplate": uri,
                 "name": func_name,
-                "description": (func.__doc__ or f"Read {uri}").strip(),
+                "description": _doc_description(func.__doc__, f"Read {uri}"),
                 "mimeType": "application/json",
             })
 
@@ -732,7 +736,7 @@ class McpServer:
 
         schema: dict[str, Any] = {
             "name": func_name,
-            "description": (func.__doc__ or f"Prompt {func_name}").strip(),
+            "description": _doc_description(func.__doc__, f"Prompt {func_name}"),
         }
 
         if arguments:
@@ -825,7 +829,7 @@ class McpServer:
 
         schema: dict[str, Any] = {
             "name": func_name,
-            "description": (func.__doc__ or f"Call {func_name}").strip(),
+            "description": _doc_description(func.__doc__, f"Call {func_name}"),
             "inputSchema": {
                 "type": "object",
                 "properties": properties,
