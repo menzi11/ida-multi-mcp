@@ -1,13 +1,18 @@
-"""Management tools for ida-multi-mcp.
+﻿"""Management tools for ida-multi-mcp.
 
 These tools are implemented directly in the MCP server (not proxied to IDA).
 They manage instance lifecycle: listing, activating, and refreshing.
 """
 
+import time
 from typing import Annotated, TYPE_CHECKING
+
+from .. import version_info
 
 if TYPE_CHECKING:
     from ..registry import InstanceRegistry
+
+_SERVER_START_TIME = time.time()
 
 # Module-level registry reference, set by server.py on startup
 _registry: "InstanceRegistry | None" = None
@@ -69,6 +74,24 @@ def refresh_tools() -> dict:
         count = _refresh_callback()
         return {"refreshed": True, "tools_count": count}
     return {"refreshed": False, "error": "Refresh callback not set"}
+
+
+def server_info(tool_cache: dict | None = None) -> dict:
+    """Return router package version, schema fingerprint, and capability flags.
+
+    Use this to verify the MCP server process loaded the expected code without
+    requiring an IDA instance or plugin reload.
+    """
+    registry = _get_registry()
+    registered = set(tool_cache.keys()) if tool_cache else set()
+    uptime = time.time() - _SERVER_START_TIME
+    payload = version_info.package_build(role="router", uptime_sec=uptime)
+    payload.update({
+        "tools_registered": len(registered),
+        "instances_connected": len(registry.list_instances()),
+        "capabilities": version_info.capability_map(registered),
+    })
+    return payload
 
 
 # Module-level router reference for compare_binaries

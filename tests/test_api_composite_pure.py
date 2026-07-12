@@ -64,6 +64,9 @@ def composite_helpers(monkeypatch):
     utils.get_prototype = MagicMock()
     utils.normalize_list_input = lambda x: x if isinstance(x, list) else [x]
     utils.parse_address = int
+    utils.safe_get_reg_name = MagicMock()
+    utils.insn_mnem = MagicMock(return_value="")
+    utils.disasm_at = MagicMock(return_value="")
     monkeypatch.setitem(sys.modules, "ida_multi_mcp.ida_mcp.utils", utils)
 
     mod = importlib.import_module("ida_multi_mcp.ida_mcp.api_composite")

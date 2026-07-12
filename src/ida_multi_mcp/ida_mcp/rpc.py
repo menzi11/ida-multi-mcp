@@ -1,12 +1,15 @@
-import json
+﻿import json
 import os
 import threading
 from typing import Any, Optional
+
+import ida_multi_mcp
+
 from .zeromcp import McpRpcRegistry, McpServer, McpToolError, McpHttpRequestHandler
 
 MCP_UNSAFE: set[str] = set()
 MCP_EXTENSIONS: dict[str, set[str]] = {}  # group -> set of function names
-MCP_SERVER = McpServer("ida-multi-mcp", extensions=MCP_EXTENSIONS)
+MCP_SERVER = McpServer("ida-multi-mcp", version=ida_multi_mcp.__version__, extensions=MCP_EXTENSIONS)
 
 # ============================================================================
 # Output Size Limiting

@@ -52,6 +52,7 @@ def struct_helpers(monkeypatch):
         "normalize_list_input", "normalize_dict_list", "parse_address",
         "get_type_by_name", "parse_decls_ctypes", "my_modifier_t",
         "read_bytes_bss_safe", "read_int_bss_safe",
+        "safe_get_reg_name", "insn_mnem", "disasm_at",
     ):
         setattr(utils, attr, MagicMock())
     utils.StructureMember = dict
@@ -72,8 +73,8 @@ class TestStructInferHelpers:
     def test_extract_base_disp(self, struct_helpers):
         import ida_ua
 
-        idaapi = sys.modules["idaapi"]
-        idaapi.get_reg_name.return_value = "rcx"
+        struct_helpers.safe_get_reg_name = lambda reg: "rcx" if reg else None
+        struct_helpers.insn_mnem = lambda insn, ea=None: "mov"
 
         insn = MagicMock()
         op = MagicMock()
@@ -81,7 +82,6 @@ class TestStructInferHelpers:
         op.reg = 1
         op.addr = 0x3B8
         insn.ops = [op] + [MagicMock(type=ida_ua.o_void)] * 7
-        insn.get_canon_mnem.return_value = "mov"
 
         hits = struct_helpers._extract_base_disp_accesses(insn, "rcx")
         assert hits == [(0x3B8, "write")]

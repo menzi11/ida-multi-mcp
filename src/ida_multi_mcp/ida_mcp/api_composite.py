@@ -35,6 +35,9 @@ from .utils import (
     get_prototype,
     normalize_list_input,
     parse_address,
+    safe_get_reg_name,
+    insn_mnem,
+    disasm_at,
 )
 
 
@@ -1096,11 +1099,8 @@ def _next_head(ea: int, end_ea: int) -> int:
     return ida_bytes.next_head(ea, end_ea)
 
 
-def _insn_mnem(insn: ida_ua.insn_t) -> str:
-    try:
-        return insn.get_canon_mnem().lower()
-    except Exception:
-        return ""
+def _insn_mnem(insn: ida_ua.insn_t, ea: int | None = None) -> str:
+    return insn_mnem(insn, ea)
 
 
 def _operand_reg_name(insn: ida_ua.insn_t, idx: int) -> str | None:
@@ -1108,7 +1108,7 @@ def _operand_reg_name(insn: ida_ua.insn_t, idx: int) -> str | None:
     if op.type == ida_ua.o_void:
         return None
     if op.type == ida_ua.o_reg:
-        return idaapi.get_reg_name(op.reg) if op.reg else None
+        return safe_get_reg_name(op.reg) if op.reg else None
     return None
 
 
@@ -1120,26 +1120,26 @@ def _describe_operand_source(insn: ida_ua.insn_t, skip_idx: int) -> str:
         if op.type == ida_ua.o_void:
             break
         if op.type == ida_ua.o_reg:
-            name = idaapi.get_reg_name(op.reg) if op.reg else "?"
+            name = safe_get_reg_name(op.reg) if op.reg else "?"
             return f"reg_{name}"
         if op.type == ida_ua.o_imm:
             return f"imm_{hex(op.value)}"
         if op.type == ida_ua.o_mem:
             return f"mem_{hex(op.addr)}"
         if op.type == ida_ua.o_displ:
-            base = idaapi.get_reg_name(op.reg) if op.reg else "?"
+            base = safe_get_reg_name(op.reg) if op.reg else "?"
             return f"mem[{base}+{hex(op.addr)}]"
         if op.type == ida_ua.o_phrase:
-            base = idaapi.get_reg_name(op.reg) if op.reg else "?"
+            base = safe_get_reg_name(op.reg) if op.reg else "?"
             index_reg = None
             if hasattr(op, "specreg") and op.specreg:
-                index_reg = idaapi.get_reg_name(op.specreg)
+                index_reg = safe_get_reg_name(op.specreg)
             return f"mem[{base}+{index_reg or '?'}*{hex(op.addr)}]"
     return "unknown"
 
 
-def _is_reg_definition(insn: ida_ua.insn_t, variable: str) -> bool:
-    mnem = _insn_mnem(insn)
+def _is_reg_definition(insn: ida_ua.insn_t, variable: str, ea: int | None = None) -> bool:
+    mnem = _insn_mnem(insn, ea)
     if mnem not in _REG_DEF_MNEMS:
         return False
     dest = _operand_reg_name(insn, 0)
@@ -1155,16 +1155,16 @@ def _is_reg_definition(insn: ida_ua.insn_t, variable: str) -> bool:
     return True
 
 
-def _classify_reg_use_role(insn: ida_ua.insn_t, variable: str, op_idx: int) -> str:
-    mnem = _insn_mnem(insn)
+def _classify_reg_use_role(insn: ida_ua.insn_t, variable: str, op_idx: int, ea: int | None = None) -> str:
+    mnem = _insn_mnem(insn, ea)
     op = insn.ops[op_idx]
     if op.type in (ida_ua.o_displ, ida_ua.o_phrase):
-        base = idaapi.get_reg_name(op.reg) if op.reg else None
+        base = safe_get_reg_name(op.reg) if op.reg else None
         if _reg_matches(variable, base):
             return "pointer_base"
         index_reg = None
         if op.type == ida_ua.o_phrase and hasattr(op, "specreg") and op.specreg:
-            index_reg = idaapi.get_reg_name(op.specreg)
+            index_reg = safe_get_reg_name(op.specreg)
         if _reg_matches(variable, index_reg):
             return "array_index"
     if mnem in ("cmp", "test"):
@@ -1197,10 +1197,10 @@ def _trace_value_in_function(
                 break
             continue
 
-        insn_text = idc.GetDisasm(ea) or ""
+        insn_text = disasm_at(ea)
         matched_def = False
 
-        if _is_reg_definition(insn, variable):
+        if _is_reg_definition(insn, variable, ea):
             definitions.append({
                 "addr": hex(ea),
                 "insn": insn_text,
@@ -1221,7 +1221,7 @@ def _trace_value_in_function(
             uses.append({
                 "addr": hex(ea),
                 "insn": insn_text,
-                "role": _classify_reg_use_role(insn, variable, i),
+                "role": _classify_reg_use_role(insn, variable, i, ea),
             })
 
         ea = _next_head(ea, func.end_ea)

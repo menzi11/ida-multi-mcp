@@ -1,4 +1,4 @@
-"""Integration tests for server.py — IdaMultiMcpServer end-to-end."""
+﻿"""Integration tests for server.py — IdaMultiMcpServer end-to-end."""
 
 import json
 import os
@@ -31,6 +31,7 @@ class TestServerInit:
     def test_management_tools_in_cache(self, server):
         assert "list_instances" in server._tool_cache
         assert "refresh_tools" in server._tool_cache
+        assert "server_info" in server._tool_cache
         assert "get_cached_output" in server._tool_cache
         assert "decompile_to_file" in server._tool_cache
         assert "refresh_caches" in server._tool_cache
@@ -55,6 +56,19 @@ class TestToolsCall:
         assert "count" in structured
         assert "instances" in structured
         assert result["content"][0]["text"] == json.dumps(structured, separators=(",", ":"))
+
+    def test_server_info_structured(self, server):
+        resp = _call(server, "tools/call",
+                     {"name": "server_info", "arguments": {}})
+        result = resp["result"]
+        assert result["isError"] is False
+        structured = result["structuredContent"]
+        assert structured["role"] == "router"
+        assert structured["version"]
+        assert structured["build_id"]
+        assert structured["schema_tools_count"] >= 80
+        assert "batch_query" in structured["capabilities"]
+        assert structured["tools_registered"] >= len(server._tool_cache)
 
     def test_get_cached_output_miss(self, server):
         resp = _call(server, "tools/call",

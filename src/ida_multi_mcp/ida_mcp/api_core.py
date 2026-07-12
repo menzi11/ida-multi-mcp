@@ -1,4 +1,4 @@
-"""Core API Functions - IDB metadata and basic queries"""
+﻿"""Core API Functions - IDB metadata and basic queries"""
 
 import re
 import time
@@ -448,8 +448,19 @@ _SERVER_START_TIME = time.time()
 
 def _build_health_payload() -> dict:
     """Build health/readiness snapshot."""
+    from ida_multi_mcp import version_info
+    from .rpc import MCP_SERVER
+
     path = idc.get_idb_path() if hasattr(idc, "get_idb_path") else ""
     module = ida_nalt.get_root_filename() or ""
+    registered = set(MCP_SERVER.tools.methods.keys())
+    build = version_info.package_build(
+        role="ida_plugin",
+        uptime_sec=time.time() - _SERVER_START_TIME,
+    )
+    build["plugin_tools_registered"] = len(registered)
+    build["ida_kernel"] = idaapi.get_kernel_version()
+    build["capabilities"] = version_info.capability_map(registered)
     return {
         "status": "ok",
         "uptime_sec": round(time.time() - _SERVER_START_TIME, 1),
@@ -459,6 +470,7 @@ def _build_health_payload() -> dict:
         "hexrays_ready": bool(ida_hexrays.init_hexrays_plugin()),
         "strings_cache_ready": _strings_cache is not None,
         "strings_cache_size": len(_strings_cache) if _strings_cache else 0,
+        "build": build,
     }
 
 

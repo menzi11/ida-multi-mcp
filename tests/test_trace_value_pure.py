@@ -59,6 +59,7 @@ def trace_helpers(monkeypatch):
         "decompile_function_safe", "extract_function_constants", "extract_function_strings",
         "get_all_comments", "get_all_xrefs", "get_assembly_lines", "get_callees",
         "get_callers", "get_prototype", "normalize_list_input", "parse_address",
+        "safe_get_reg_name", "insn_mnem", "disasm_at",
     ):
         setattr(utils, attr, MagicMock())
     monkeypatch.setitem(sys.modules, "ida_multi_mcp.ida_mcp.utils", utils)

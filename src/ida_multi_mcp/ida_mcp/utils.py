@@ -1,4 +1,4 @@
-import fnmatch
+﻿import fnmatch
 import json
 import os
 import re
@@ -22,6 +22,7 @@ import ida_funcs
 import ida_hexrays
 import ida_bytes
 import ida_kernwin
+import ida_lines
 import ida_nalt
 import ida_typeinf
 import idaapi
@@ -464,6 +465,92 @@ def parse_address(addr: str | int) -> int:
     if result < 0 or result > _MAX_ADDRESS:
         raise IDAError(f"Address out of range: must be 0..0x{_MAX_ADDRESS:X}")
     return result
+
+
+def safe_get_reg_name(reg: int) -> str | None:
+    """Return register name, tolerating IDA SDK signature differences."""
+    if not reg:
+        return None
+    name = None
+    for args in ((reg,), (reg, 0), (reg, 8), (reg, 4), (reg, 2), (reg, 1)):
+        try:
+            candidate = idaapi.get_reg_name(*args)
+        except TypeError:
+            continue
+        if candidate:
+            name = candidate
+            break
+    if name is None:
+        getter = getattr(idc, "get_reg_name", None)
+        if getter is not None:
+            try:
+                name = getter(reg)
+            except TypeError:
+                pass
+    if not name:
+        return None
+    if isinstance(name, bytes):
+        name = name.decode("utf-8", "replace")
+    return str(name).strip()
+
+
+def insn_mnem(insn, ea: int | None = None) -> str:
+    """Return canonical instruction mnemonic across IDA SDK variants."""
+    getters: list = []
+    try:
+        import ida_idp
+
+        getters.append(lambda: insn.get_canon_mnem(ida_idp.ph))
+    except Exception:
+        pass
+    try:
+        ph = getattr(idaapi.cvar, "ph", None)
+        if ph is not None:
+            getters.append(lambda: insn.get_canon_mnem(ph))
+    except Exception:
+        pass
+    getters.append(lambda: insn.get_canon_mnem())
+
+    for getter in getters:
+        try:
+            mnem = getter()
+            if mnem:
+                return str(mnem).lower()
+        except TypeError:
+            continue
+        except Exception:
+            continue
+
+    if ea is not None:
+        for getter in (
+            lambda: idc.print_insn_mnem(ea),
+            lambda: (idc.generate_disasm_line(ea, 0) or "").split()[0],
+        ):
+            try:
+                mnem = getter()
+                if mnem:
+                    return str(mnem).lower()
+            except Exception:
+                continue
+    return ""
+
+
+def disasm_at(ea: int) -> str:
+    """Return disassembly text for an address."""
+    for getter in (
+        lambda: idc.GetDisasm(ea),
+        lambda: idc.generate_disasm_line(ea, 0),
+        lambda: ida_lines.generate_disasm_line(ea, 0),
+    ):
+        try:
+            text = getter()
+            if text:
+                return str(text)
+        except (AttributeError, TypeError):
+            continue
+        except Exception:
+            continue
+    return ""
 
 
 def read_bytes_bss_safe(ea: int, size: int) -> bytes:

@@ -26,6 +26,9 @@ from .utils import (
     TypeEdit,
     read_bytes_bss_safe,
     read_int_bss_safe,
+    safe_get_reg_name,
+    insn_mnem,
+    disasm_at,
 )
 
 
@@ -628,11 +631,8 @@ def _next_head(ea: int, end_ea: int) -> int:
     return ida_bytes.next_head(ea, end_ea)
 
 
-def _insn_mnem(insn: ida_ua.insn_t) -> str:
-    try:
-        return insn.get_canon_mnem().lower()
-    except Exception:
-        return ""
+def _insn_mnem(insn: ida_ua.insn_t, ea: int | None = None) -> str:
+    return insn_mnem(insn, ea)
 
 
 def _reg_name_matches(base_register: str, reg_name: str | None) -> bool:
@@ -670,14 +670,14 @@ def _extract_base_disp_accesses(
             break
         op = insn.ops[i]
         if op.type == ida_ua.o_displ:
-            base = idaapi.get_reg_name(op.reg) if op.reg else None
+            base = safe_get_reg_name(op.reg) if op.reg else None
             if not _reg_name_matches(base_register, base):
                 continue
             kind = _mem_access_kind(insn, i)
             if kind:
                 hits.append((op.addr & 0xFFFFFFFFFFFFFFFF, kind))
         elif op.type == ida_ua.o_phrase:
-            base = idaapi.get_reg_name(op.reg) if op.reg else None
+            base = safe_get_reg_name(op.reg) if op.reg else None
             if not _reg_name_matches(base_register, base):
                 continue
             kind = _mem_access_kind(insn, i)
@@ -709,7 +709,7 @@ def _infer_struct_fields(
                 break
             continue
 
-        insn_text = idc.GetDisasm(ea) or ""
+        insn_text = disasm_at(ea)
         for offset, kind in _extract_base_disp_accesses(insn, base_register):
             stats = field_stats.setdefault(offset, {
                 "access_count": 0,

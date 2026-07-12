@@ -53,6 +53,7 @@ def analysis_mem_helpers(monkeypatch):
         "parse_address", "normalize_list_input", "normalize_dict_list", "paginate",
         "get_function", "get_prototype", "get_stack_frame_variables_internal",
         "decompile_function_safe", "compact_whitespace", "get_assembly_lines",
+        "safe_get_reg_name", "insn_mnem", "disasm_at",
         "get_all_xrefs", "get_all_comments", "extract_function_strings",
     ):
         setattr(utils, attr, MagicMock())

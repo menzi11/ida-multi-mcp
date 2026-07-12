@@ -29,6 +29,9 @@ from .utils import (
     decompile_function_safe,
     compact_whitespace,
     get_assembly_lines,
+    safe_get_reg_name,
+    insn_mnem,
+    disasm_at,
     get_all_xrefs,
     get_all_comments,
     extract_function_strings,
@@ -72,11 +75,8 @@ def _operand_type(insn: ida_ua.insn_t, i: int) -> int:
     return insn.ops[i].type
 
 
-def _insn_mnem(insn: ida_ua.insn_t) -> str:
-    try:
-        return insn.get_canon_mnem().lower()
-    except Exception:
-        return ""
+def _insn_mnem(insn: ida_ua.insn_t, ea: int | None = None) -> str:
+    return insn_mnem(insn, ea)
 
 
 def _value_to_le_bytes(value: int) -> tuple[bytes, int, int] | None:
@@ -1461,7 +1461,7 @@ def _extract_mem_operands(insn: ida_ua.insn_t) -> list[dict]:
                 "offset": 0,
             })
         elif op.type == ida_ua.o_displ:
-            base = idaapi.get_reg_name(op.reg) if op.reg else None
+            base = safe_get_reg_name(op.reg) if op.reg else None
             out.append({
                 "operand": i,
                 "abs_addr": None,
@@ -1469,7 +1469,7 @@ def _extract_mem_operands(insn: ida_ua.insn_t) -> list[dict]:
                 "offset": op.addr & 0xFFFFFFFFFFFFFFFF,
             })
         elif op.type == ida_ua.o_phrase:
-            base = idaapi.get_reg_name(op.reg) if op.reg else None
+            base = safe_get_reg_name(op.reg) if op.reg else None
             out.append({
                 "operand": i,
                 "abs_addr": None,
@@ -1558,7 +1558,7 @@ def _find_mem_accesses(
 
             func = idaapi.get_func(ea)
             func_name = idaapi.get_func_name(ea) if func else None
-            insn_text = idc.GetDisasm(ea) or ""
+            insn_text = disasm_at(ea)
 
             for mem in _extract_mem_operands(insn):
                 if not _mem_target_matches(

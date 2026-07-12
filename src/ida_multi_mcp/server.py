@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from . import __version__ as _PACKAGE_VERSION
 from .vendor.zeromcp import McpServer
 from .registry import InstanceRegistry
 from .router import InstanceRouter
@@ -107,7 +108,7 @@ class IdaMultiMcpServer:
         """
         self.registry = InstanceRegistry(registry_path)
         self.router = InstanceRouter(self.registry)
-        self.server = McpServer("ida-multi-mcp", version="1.0.0")
+        self.server = McpServer("ida-multi-mcp", version=_PACKAGE_VERSION)
 
         # idalib lifecycle manager
         self.idalib_manager = IdalibManager(self.registry, python_executable=idalib_python)
@@ -193,6 +194,14 @@ class IdaMultiMcpServer:
 
             elif name == "refresh_tools":
                 result = management.refresh_tools()
+                return {
+                    "content": [{"type": "text", "text": _json_text(result)}],
+                    "structuredContent": result,
+                    "isError": False
+                }
+
+            elif name == "server_info":
+                result = management.server_info(self._tool_cache)
                 return {
                     "content": [{"type": "text", "text": _json_text(result)}],
                     "structuredContent": result,
@@ -600,6 +609,42 @@ class IdaMultiMcpServer:
             }
         }
 
+        self._tool_cache["server_info"] = {
+            "name": "server_info",
+            "description": "Return router package version, schema fingerprint, tool count, "
+                "and capability flags. Call without instance_id to verify the MCP server "
+                "process loaded the expected code.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            },
+            "outputSchema": {
+                "type": "object",
+                "properties": {
+                    "role": {"type": "string"},
+                    "package": {"type": "string"},
+                    "version": {"type": "string"},
+                    "build_id": {"type": "string"},
+                    "git_revision": {"type": ["string", "null"]},
+                    "schema_tools_count": {"type": "integer"},
+                    "schema_fingerprint": {"type": ["string", "null"]},
+                    "tools_registered": {"type": "integer"},
+                    "instances_connected": {"type": "integer"},
+                    "capabilities": {"type": "object"},
+                    "uptime_sec": {"type": "number"},
+                    "python_executable": {"type": "string"},
+                    "python_version": {"type": "string"},
+                    "package_path": {"type": "string"},
+                },
+                "required": [
+                    "role", "package", "version", "build_id",
+                    "schema_tools_count", "tools_registered",
+                    "instances_connected", "capabilities",
+                ],
+            },
+        }
+
         self._tool_cache["compare_binaries"] = {
             "name": "compare_binaries",
             "description": "Compare two IDA instances by diffing their binary metadata, entrypoints, and segments. Takes two instance_id values and returns what is common vs unique to each.",
@@ -881,8 +926,11 @@ class IdaMultiMcpServer:
 
         # Refresh tools
         self._refresh_tools()
-        print(f"[ida-multi-mcp] Server starting with {len(self._tool_cache)} tools",
-              file=sys.stderr)
+        print(
+            f"[ida-multi-mcp] Server starting v{_PACKAGE_VERSION} "
+            f"with {len(self._tool_cache)} tools",
+            file=sys.stderr,
+        )
 
         # Run server with stdio transport (idalib cleanup via atexit in IdalibManager)
         self.server.stdio()

@@ -8,6 +8,7 @@ This guide reduces round-trips by picking the right tool on the first call. It d
 
 ## Golden Rules
 
+0. **Verify deployment:** call `server_info` (router, no instance_id) before a session; call `server_health` on an instance and check `build.build_id` / `capabilities`.
 1. **One function, one call:** prefer `analyze_function` over `decompile` + `callees` + `xrefs_to`.
 2. **Many functions, one call:** prefer `analyze_batch` over repeated `analyze_function`.
 3. **Callee subtree:** prefer `decompile_tree` over recursive `decompile` + `callees`.
@@ -54,6 +55,7 @@ Need several independent reads?
 
 | Goal | Tool | Avoid |
 |------|------|-------|
+| Version / deployment check | `server_info`, `server_health` | Guessing from tool count alone |
 | Function overview | `analyze_function` | 3–5 separate calls |
 | N function overviews | `analyze_batch` | N × `analyze_function` |
 | Callee pseudocode tree | `decompile_tree` | N × `decompile` |
@@ -71,6 +73,8 @@ Need several independent reads?
 
 | Tool | Parameter | Default | Tip |
 |------|-----------|---------|-----|
+| `server_info` | _(none)_ | — | Router only; compare `build_id` and `capabilities` after upgrades |
+| `server_health` | `instance_id` | required | Inspect `build` for IDA plugin version and capability flags |
 | `analyze_function` | `max_pseudocode_lines` | 600 | `0` = full text (server may cache) |
 | `analyze_batch` | `max_pseudocode_lines` | 600 | Same as above |
 | `decompile_tree` | `depth` / `max_nodes` | 2 / 30 | Increase `max_nodes` for stubs |
