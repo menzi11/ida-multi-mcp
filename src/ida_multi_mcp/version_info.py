@@ -40,14 +40,19 @@ def git_revision(start: Path | None = None) -> str | None:
     root = _find_repo_root(start or _PACKAGE_DIR)
     if root is None:
         return None
+    run_kwargs: dict[str, Any] = {
+        "cwd": root,
+        "capture_output": True,
+        "text": True,
+        "timeout": 2,
+        "check": False,
+    }
+    if sys.platform == "win32":
+        run_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
+            **run_kwargs,
         )
     except (OSError, subprocess.SubprocessError):
         return None
