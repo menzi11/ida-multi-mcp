@@ -1876,13 +1876,24 @@
   },
   {
     "name": "disasm",
-    "description": "Disassemble function to assembly instructions",
+    "description": "Disassemble instructions from addr, optionally stopping before end.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "addr": {
           "type": "string",
-          "description": "Function address to disassemble"
+          "description": "Start address to disassemble (function entry or mid-function)"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional stop address (exclusive). Disassemble from addr until this address."
         },
         "max_instructions": {
           "type": "integer",

@@ -1,5 +1,6 @@
-import json
+﻿import json
 import inspect
+from ida_multi_mcp.param_compat import normalize_tool_params
 import os
 import sys
 import threading
@@ -241,6 +242,8 @@ class JsonRpcRegistry:
 
         # Validate dict params
         if isinstance(params, dict):
+            params = normalize_tool_params(method, params)
+
             # Check all required params are present
             missing = set(required_params) - set(params.keys())
             if missing:

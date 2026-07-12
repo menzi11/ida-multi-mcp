@@ -178,7 +178,11 @@ def decompile(
 @idasync
 @tool_timeout(90.0)
 def disasm(
-    addr: Annotated[str, "Function address to disassemble"],
+    addr: Annotated[str, "Start address to disassemble (function entry or mid-function)"],
+    end: Annotated[
+        str | None,
+        "Optional stop address (exclusive). Disassemble from addr until this address.",
+    ] = None,
     max_instructions: Annotated[
         int, "Max instructions per function (default: 5000, max: 50000)"
     ] = 5000,
@@ -187,7 +191,7 @@ def disasm(
         bool, "Compute total instruction count (default: false)"
     ] = False,
 ) -> dict:
-    """Disassemble function to assembly instructions"""
+    """Disassemble instructions from addr, optionally stopping before end."""
 
     # Enforce max limit
     if max_instructions <= 0 or max_instructions > 50000:
@@ -195,9 +199,17 @@ def disasm(
     if offset < 0:
         offset = 0
 
-
     try:
         start = parse_address(addr)
+        end_ea: int | None = parse_address(end) if end is not None else None
+        if end_ea is not None and end_ea <= start:
+            return {
+                "addr": addr,
+                "asm": None,
+                "error": "end must be greater than addr",
+                "cursor": {"done": True},
+            }
+
         func = idaapi.get_func(start)
 
         # Get segment info
@@ -249,12 +261,16 @@ def disasm(
                     continue
                 if ea < start:
                     continue
+                if end_ea is not None and ea >= end_ea:
+                    break
                 if not _maybe_add(ea):
                     break
         else:
             ea = start
             while ea < seg.end_ea:
                 if ea == idaapi.BADADDR:
+                    break
+                if end_ea is not None and ea >= end_ea:
                     break
                 if _decode_insn_at(ea) is None:
                     break

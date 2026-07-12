@@ -1,4 +1,4 @@
-"""Tests for vendor/zeromcp/jsonrpc.py — JSON-RPC 2.0 dispatch."""
+﻿"""Tests for vendor/zeromcp/jsonrpc.py — JSON-RPC 2.0 dispatch."""
 
 import pytest
 
@@ -99,6 +99,31 @@ class TestParams:
             "params": {"a": 1, "b": 2, "c": 3}, "id": 1
         })
         assert resp["error"]["code"] == -32602
+
+    def test_disasm_end_param_accepted(self, rpc):
+        def disasm(addr: str, end: str | None = None) -> dict:
+            return {"addr": addr, "end": end}
+
+        rpc.method(disasm)
+        resp = rpc.dispatch({
+            "jsonrpc": "2.0", "method": "disasm",
+            "params": {"addr": "0x181361090", "end": "0x1813610c0"}, "id": 1
+        })
+        assert resp["result"] == {
+            "addr": "0x181361090",
+            "end": "0x1813610c0",
+        }
+
+    def test_disasm_end_ea_alias(self, rpc):
+        def disasm(addr: str, end: str | None = None) -> dict:
+            return {"addr": addr, "end": end}
+
+        rpc.method(disasm)
+        resp = rpc.dispatch({
+            "jsonrpc": "2.0", "method": "disasm",
+            "params": {"addr": "0x1000", "end_ea": "0x1100"}, "id": 1
+        })
+        assert resp["result"]["end"] == "0x1100"
 
     def test_null_params_no_required(self, rpc):
         """Method with all-optional params should accept null params."""
