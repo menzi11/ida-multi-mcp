@@ -21,6 +21,8 @@ If capabilities are false after an upgrade: restart Cursor MCP **and** restart I
 
 Read [docs/ops/mcp-tool-selection.md](../../../docs/ops/mcp-tool-selection.md) before picking tools.
 
+External mirrors (same content, self-contained docs): `AllSkills/skills/ida-multi-mcp/`, `ComfyAI/config/skills/ida-multi-mcp/`.
+
 Quick defaults:
 - One function → `analyze_function`
 - Many functions → `analyze_batch`

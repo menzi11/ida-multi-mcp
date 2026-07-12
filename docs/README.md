@@ -26,6 +26,7 @@ This document is the entry point for the `ida-multi-mcp` documentation.
 - Ops roadmap: `docs/ops/ROADMAP.md`
 - Agent tool selection: `docs/ops/mcp-tool-selection.md`
 - Cursor project skill: `.cursor/skills/ida-multi-mcp/SKILL.md`
+- External skill mirrors: `AllSkills/skills/ida-multi-mcp/`, `ComfyAI/config/skills/ida-multi-mcp/`
 - Installation guide: `docs/installation.md`
 
 ## Applicability Snapshot

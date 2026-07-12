@@ -26,4 +26,5 @@ Last updated: 2026-07-12
 - Tool selection: `docs/ops/mcp-tool-selection.md`
 - Deployment check: call `server_info` (Router) and `server_health` (per instance); compare `build_id` / `capabilities`.
 - Project skill (optional): `.cursor/skills/ida-multi-mcp/SKILL.md`
+- External skill mirrors: `AllSkills/skills/ida-multi-mcp/`, `ComfyAI/config/skills/ida-multi-mcp/`
 - Windows: install the package for **both** Router Python and IDA's Python (see `docs/installation.md`).
