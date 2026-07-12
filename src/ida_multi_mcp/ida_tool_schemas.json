@@ -1,7 +1,2646 @@
 [
   {
-    "name": "lookup_funcs",
-    "description": "Get functions by address or name (auto-detects)",
+    "name": "analyze_batch",
+    "description": "Analyze multiple functions in one IDA round-trip.\n\nUse instead of calling analyze_function or decompile repeatedly when you\nneed summaries for N functions. Selectively include decompilation,\ndisassembly, xrefs, strings, and callees per function.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Function addresses to analyze"
+        },
+        "include_decompile": {
+          "type": "boolean",
+          "description": "Include pseudocode (default: true)"
+        },
+        "include_asm": {
+          "type": "boolean",
+          "description": "Include disassembly (default: false)"
+        },
+        "include_xrefs": {
+          "type": "boolean",
+          "description": "Include xrefs (default: true)"
+        },
+        "include_strings": {
+          "type": "boolean",
+          "description": "Include strings (default: true)"
+        },
+        "include_callees": {
+          "type": "boolean",
+          "description": "Include callees (default: true)"
+        },
+        "max_pseudocode_lines": {
+          "type": "integer",
+          "description": "Pseudocode line cap per function (default: 600). Set 0 for full text"
+        }
+      },
+      "required": [
+        "addrs"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "analyze_component",
+    "description": "Analyze related functions as a group: per-function compact summaries,\ninternal call graph (edges only between supplied functions), shared globals,\ninterface vs internal classification, and strings used by multiple members.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Function addresses (comma-separated or list)"
+        }
+      },
+      "required": [
+        "addrs"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "functions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "addr": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "prototype": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "size": {
+                "type": "integer"
+              },
+              "callees": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "strings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "basic_blocks": {
+                "type": "integer"
+              },
+              "complexity": {
+                "type": "integer"
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "internal_call_graph": {
+          "type": "object",
+          "properties": {
+            "nodes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "edges": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "from",
+                  "to",
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "nodes",
+            "edges"
+          ],
+          "additionalProperties": false
+        },
+        "shared_globals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "addr": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "accessed_by": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "addr",
+              "name",
+              "accessed_by"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "interface_functions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "internal_only": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "string_usage": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "analyze_function",
+    "description": "Compact single-function analysis in one call: pseudocode, strings,\nconstants, callers, callees, xrefs, comments, and basic block summary.\n\nPrefer this over chaining decompile + callees + xrefs_to for a single\nfunction. For multiple functions, use analyze_batch instead.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addr": {
+          "type": "string",
+          "description": "Function address or name"
+        },
+        "include_asm": {
+          "type": "boolean",
+          "description": "Include full disassembly (default: false, saves tokens)"
+        },
+        "max_pseudocode_lines": {
+          "type": "integer",
+          "description": "Pseudocode line cap (default: 600). Set 0 for full text (large outputs cached by server)"
+        }
+      },
+      "required": [
+        "addr"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "addr": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "prototype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "size": {
+          "type": "integer"
+        },
+        "decompiled": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decompile_lines": {
+          "type": "integer"
+        },
+        "decompile_truncated": {
+          "type": "integer"
+        },
+        "assembly": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "constants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "addr": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "decimal": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "addr",
+              "value",
+              "decimal"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "callees": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "callers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "xrefs": {
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "addr",
+                  "type"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "from": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "addr",
+                  "type"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "to",
+            "from"
+          ],
+          "additionalProperties": false
+        },
+        "comments": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "regular": {
+                "type": "string"
+              },
+              "repeatable": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "basic_blocks": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer"
+            },
+            "cyclomatic_complexity": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "count",
+            "cyclomatic_complexity"
+          ],
+          "additionalProperties": false
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "append_comments",
+    "description": "Append comments at addresses, deduping exact text by default. Unlike\nset_comments (which overwrites), this preserves existing annotations — use\nit for incremental commentary. scope='auto' (default) writes a function\ncomment when addr is a function start, otherwise a line comment; force\nwith scope='func' or 'line'. dedupe=True skips writes when the exact\nstripped text already appears on its own line.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string",
+                    "description": "Address (hex or decimal)"
+                  },
+                  "comment": {
+                    "type": "string",
+                    "description": "Comment text to append"
+                  },
+                  "scope": {
+                    "type": "string",
+                    "description": "auto|func|line (default: auto)"
+                  },
+                  "dedupe": {
+                    "type": "boolean",
+                    "description": "Skip if exact text already exists (default: true)"
+                  }
+                },
+                "required": [
+                  "addr",
+                  "comment"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "Address (hex or decimal)"
+                },
+                "comment": {
+                  "type": "string",
+                  "description": "Comment text to append"
+                },
+                "scope": {
+                  "type": "string",
+                  "description": "auto|func|line (default: auto)"
+                },
+                "dedupe": {
+                  "type": "boolean",
+                  "description": "Skip if exact text already exists (default: true)"
+                }
+              },
+              "required": [
+                "addr",
+                "comment"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "appended": {
+            "type": "boolean"
+          },
+          "skipped": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "name": "basic_blocks",
+    "description": "Get control flow graph basic blocks for functions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Function addresses to get basic blocks for"
+        },
+        "max_blocks": {
+          "type": "integer",
+          "description": "Max basic blocks per function (default: 1000, max: 10000)"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Skip first N blocks (default: 0)"
+        }
+      },
+      "required": [
+        "addrs"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "binary_fingerprint",
+    "description": "Content fingerprint of the loaded binary for similarity index keying.\n\nReturns the input file's sha256 and md5 (hex, or null if unavailable), the\ntotal function count, and an arch label (e.g. 'x86_64'). The sha256 keys the\nper-binary similarity index so the same binary shares one index across\ninstances; md5 is the fallback when sha256 is unavailable.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "md5": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "function_count": {
+          "type": "integer"
+        },
+        "arch": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha256",
+        "md5",
+        "function_count",
+        "arch"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "call_path",
+    "description": "Find call paths from function A to function B over internal calls.\n\nReturns all paths up to max_depth. Use to distinguish main-path vs\ninit-path reachability.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "from_addr": {
+          "type": "string",
+          "description": "Start function address or name"
+        },
+        "to_addr": {
+          "type": "string",
+          "description": "Target function address or name"
+        },
+        "max_depth": {
+          "type": "integer",
+          "description": "Max hops (default: 10, max: 20)"
+        },
+        "max_paths": {
+          "type": "integer",
+          "description": "Max paths returned (default: 20, max: 50)"
+        }
+      },
+      "required": [
+        "from_addr",
+        "to_addr"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "from_addr": {
+          "type": "string"
+        },
+        "to_addr": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "path_strings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "count": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "callees",
+    "description": "Get functions called by the specified functions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Function addresses to get callees for"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Max callees per function (default: 200, max: 500)"
+        }
+      },
+      "required": [
+        "addrs"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "callgraph",
+    "description": "Build call graph starting from root functions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "roots": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Root function addresses to start call graph traversal from"
+        },
+        "max_depth": {
+          "type": "integer",
+          "description": "Maximum depth for call graph traversal"
+        },
+        "max_nodes": {
+          "type": "integer",
+          "description": "Max nodes across the graph (default: 1000, max: 100000)"
+        },
+        "max_edges": {
+          "type": "integer",
+          "description": "Max edges across the graph (default: 5000, max: 200000)"
+        },
+        "max_edges_per_func": {
+          "type": "integer",
+          "description": "Max edges per function (default: 200, max: 5000)"
+        }
+      },
+      "required": [
+        "roots"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "classify_functions",
+    "description": "Classify functions as thunk/wrapper/leaf/dispatcher/complex based on\nsize, callee count, and flags. Use '*' (default) for all non-library\nfunctions. Returns paginated results sorted by address.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Function addresses (or '*' for all non-library functions)"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Skip first N results (default: 0)"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Max results (default: 500, max: 5000)"
+        }
+      },
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object"
+    }
+  },
+  {
+    "name": "dbg_add_bp",
+    "description": "Add breakpoints",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Address(es) to add breakpoints at"
+        }
+      },
+      "required": [
+        "addrs"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "dbg_bps",
+    "description": "List breakpoints",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "dbg_continue",
+    "description": "Continue debugger",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "outputSchema": {
+      "type": "string"
+    }
+  },
+  {
+    "name": "dbg_delete_bp",
+    "description": "Delete breakpoints",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Address(es) to delete breakpoints from"
+        }
+      },
+      "required": [
+        "addrs"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "dbg_exit",
+    "description": "Exit debugger",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "dbg_read",
+    "description": "Read debug memory",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "regions": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string",
+                    "description": "Address to read from (hex or decimal)"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "description": "Number of bytes to read"
+                  }
+                },
+                "required": [
+                  "addr",
+                  "size"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "Address to read from (hex or decimal)"
+                },
+                "size": {
+                  "type": "integer",
+                  "description": "Number of bytes to read"
+                }
+              },
+              "required": [
+                "addr",
+                "size"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "regions"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "dbg_regs",
+    "description": "Get registers for the current thread. Use filter='gp' for general-purpose\nonly, or filter='named' with names='RAX,RBX' to select specific registers.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filter": {
+          "type": "string",
+          "description": "Register filter: 'all' (default), 'gp' (general-purpose only), or 'named'"
+        },
+        "names": {
+          "type": "string",
+          "description": "Comma-separated register names (only used when filter='named', e.g. 'RAX,RBX,RCX')"
+        }
+      },
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "thread_id": {
+          "type": "integer"
+        },
+        "registers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "thread_id",
+        "registers"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "dbg_regs_all",
+    "description": "Get all registers for all threads.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "integer"
+          },
+          "registers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "thread_id",
+          "registers"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "name": "dbg_regs_remote",
+    "description": "Get registers for specified thread(s). Use filter='gp' for general-purpose\nonly, or filter='named' with names='RAX,RBX' to select specific registers.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "tids": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "description": "Thread ID(s) to get registers for"
+        },
+        "filter": {
+          "type": "string",
+          "description": "Register filter: 'all' (default), 'gp', or 'named'"
+        },
+        "names": {
+          "type": "string",
+          "description": "Comma-separated register names (only used when filter='named')"
+        }
+      },
+      "required": [
+        "tids"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "dbg_run_to",
+    "description": "Run to address",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addr": {
+          "type": "string",
+          "description": "Address"
+        }
+      },
+      "required": [
+        "addr"
+      ]
+    }
+  },
+  {
+    "name": "dbg_stacktrace",
+    "description": "Get call stack",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "dbg_start",
+    "description": "Start debugger",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "dbg_step_into",
+    "description": "Step into",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "dbg_step_over",
+    "description": "Step over",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "dbg_toggle_bp",
+    "description": "Enable/disable breakpoints",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string",
+                    "description": "Breakpoint address (hex or decimal)"
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "Enable (true) or disable (false)"
+                  }
+                },
+                "required": [
+                  "addr",
+                  "enabled"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "Breakpoint address (hex or decimal)"
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Enable (true) or disable (false)"
+                }
+              },
+              "required": [
+                "addr",
+                "enabled"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "dbg_write",
+    "description": "Write debug memory",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "regions": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string",
+                    "description": "Address to patch (hex or decimal)"
+                  },
+                  "data": {
+                    "type": "string",
+                    "description": "Hex data to write (space-separated bytes)"
+                  }
+                },
+                "required": [
+                  "addr",
+                  "data"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "Address to patch (hex or decimal)"
+                },
+                "data": {
+                  "type": "string",
+                  "description": "Hex data to write (space-separated bytes)"
+                }
+              },
+              "required": [
+                "addr",
+                "data"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "regions"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "declare_stack",
+    "description": "Create stack vars",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string",
+                    "description": "Function address"
+                  },
+                  "offset": {
+                    "type": "string",
+                    "description": "Stack offset"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Variable name"
+                  },
+                  "ty": {
+                    "type": "string",
+                    "description": "Type name"
+                  }
+                },
+                "required": [
+                  "addr",
+                  "offset",
+                  "name",
+                  "ty"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "Function address"
+                },
+                "offset": {
+                  "type": "string",
+                  "description": "Stack offset"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Variable name"
+                },
+                "ty": {
+                  "type": "string",
+                  "description": "Type name"
+                }
+              },
+              "required": [
+                "addr",
+                "offset",
+                "name",
+                "ty"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "items"
+      ]
+    }
+  },
+  {
+    "name": "declare_type",
+    "description": "Declare types",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "decls": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "C type declarations"
+        }
+      },
+      "required": [
+        "decls"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "decompile",
+    "description": "Decompile function to pseudocode",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addr": {
+          "type": "string",
+          "description": "Function address to decompile"
+        }
+      },
+      "required": [
+        "addr"
+      ]
+    },
+    "outputSchema": {
+      "type": "object"
+    }
+  },
+  {
+    "name": "decompile_tree",
+    "description": "Decompile a function and its internal callees up to depth N in one call.\n\nReturns flat nodes + edges (deduped by address). Nodes beyond max_nodes\nappear in stubs — decompile them individually or rerun with a higher budget.\n\nPrefer this over calling decompile + callees recursively when exploring\na call subtree.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addr": {
+          "type": "string",
+          "description": "Root function address or name"
+        },
+        "depth": {
+          "type": "integer",
+          "description": "Callee recursion depth (default: 2, max: 10)"
+        },
+        "max_nodes": {
+          "type": "integer",
+          "description": "Max functions to decompile (default: 30, max: 200)"
+        },
+        "include_asm": {
+          "type": "boolean",
+          "description": "Include disassembly per node (default: false)"
+        },
+        "max_pseudocode_lines": {
+          "type": "integer",
+          "description": "Pseudocode line cap per node (default: 600). Set 0 for full text"
+        }
+      },
+      "required": [
+        "addr"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "addr": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "depth": {
+                "type": "integer"
+              },
+              "pseudocode": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "decompile_lines": {
+                "type": "integer"
+              },
+              "decompile_truncated": {
+                "type": "integer"
+              },
+              "assembly": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "stubs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stats": {
+          "type": "object",
+          "properties": {
+            "decompiled": {
+              "type": "integer"
+            },
+            "stubbed": {
+              "type": "integer"
+            },
+            "deduped": {
+              "type": "integer"
+            },
+            "total_discovered": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "decompiled",
+            "stubbed",
+            "deduped",
+            "total_discovered"
+          ],
+          "additionalProperties": false
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "define_code",
+    "description": "Convert raw bytes to a code instruction at each given address. Returns\n{addr, ea, length} on success (length is the instruction byte length) or\n{addr, ea, error} if create_insn failed. Use this when IDA classified an\ninstruction as data or failed to decode.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string",
+                    "description": "Address to define (hex or decimal)"
+                  },
+                  "end": {
+                    "type": "string",
+                    "description": "Optional end address for explicit bounds"
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "Address to define (hex or decimal)"
+                },
+                "end": {
+                  "type": "string",
+                  "description": "Optional end address for explicit bounds"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "type": "string"
+          },
+          "ea": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "length": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "name": "define_func",
+    "description": "Define a function at each given address. IDA infers bounds unless an\nexplicit end address is provided. Returns {addr, start, end} on success or\n{addr, start, error} if the function already exists or add_func fails.\nUse this when IDA auto-analysis missed a function entry point.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string",
+                    "description": "Address to define (hex or decimal)"
+                  },
+                  "end": {
+                    "type": "string",
+                    "description": "Optional end address for explicit bounds"
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "Address to define (hex or decimal)"
+                },
+                "end": {
+                  "type": "string",
+                  "description": "Optional end address for explicit bounds"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "type": "string"
+          },
+          "ea": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "length": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "name": "delete_stack",
+    "description": "Delete stack vars",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string",
+                    "description": "Function address"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Variable name"
+                  }
+                },
+                "required": [
+                  "addr",
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "Function address"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Variable name"
+                }
+              },
+              "required": [
+                "addr",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "items"
+      ]
+    }
+  },
+  {
+    "name": "diff_before_after",
+    "description": "Apply a rename/type/comment action and return the before/after decompilation\nside by side. Actions: 'rename_func' ({name}), 'set_type' ({type}),\n'set_comment' ({comment}). Useful to verify a rename or type change actually\nimproved readability. Returns {before, after, action_applied, changes_detected}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addr": {
+          "type": "string",
+          "description": "Function address"
+        },
+        "action": {
+          "type": "string",
+          "description": "Action: 'rename_func', 'set_type', 'set_comment'"
+        },
+        "action_args": {
+          "type": "object",
+          "description": "Arguments for the action"
+        }
+      },
+      "required": [
+        "addr",
+        "action",
+        "action_args"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "before": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "after": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action_applied": {
+          "type": "string"
+        },
+        "changes_detected": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "diff_functions",
+    "description": "Compare two functions by pseudocode unified diff and constant sets.\n\nUnlike compare_functions (similarity score), this shows line-level\npseudocode differences and symmetric constant set changes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addr_a": {
+          "type": "string",
+          "description": "First function address or name"
+        },
+        "addr_b": {
+          "type": "string",
+          "description": "Second function address or name"
+        }
+      },
+      "required": [
+        "addr_a",
+        "addr_b"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "addr_a": {
+          "type": "string"
+        },
+        "addr_b": {
+          "type": "string"
+        },
+        "name_a": {
+          "type": "string"
+        },
+        "name_b": {
+          "type": "string"
+        },
+        "pseudocode_changed": {
+          "type": "boolean"
+        },
+        "unified_diff": {
+          "type": "string"
+        },
+        "constants": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "disasm",
+    "description": "Disassemble function to assembly instructions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addr": {
+          "type": "string",
+          "description": "Function address to disassemble"
+        },
+        "max_instructions": {
+          "type": "integer",
+          "description": "Max instructions per function (default: 5000, max: 50000)"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Skip first N instructions (default: 0)"
+        },
+        "include_total": {
+          "type": "boolean",
+          "description": "Compute total instruction count (default: false)"
+        }
+      },
+      "required": [
+        "addr"
+      ]
+    },
+    "outputSchema": {
+      "type": "object"
+    }
+  },
+  {
+    "name": "enum_upsert",
+    "description": "Create or extend local enums in an idempotent way. Creates the enum if\nit doesn't exist, then upserts each member: skips if name+value already match,\nreports conflict if name or value collides with a different entry. Never\ndestructively replaces existing members.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "queries": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            {
+              "type": "object"
+            }
+          ],
+          "description": "Enum upsert: name, members [{name, value}], bitfield (optional bool)"
+        }
+      },
+      "required": [
+        "queries"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "export_funcs",
+    "description": "Export function data in various formats",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Function addresses to export"
+        },
+        "format": {
+          "type": "string",
+          "description": "Export format: json (default), c_header, or prototypes"
+        }
+      },
+      "required": [
+        "addrs"
+      ]
+    },
+    "outputSchema": {
+      "type": "object"
+    }
+  },
+  {
+    "name": "find",
+    "description": "Search for patterns in the binary (strings, immediate values, or references)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Search type: 'string', 'immediate', 'data_ref', or 'code_ref'"
+        },
+        "targets": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "description": "Search targets (strings, integers, or addresses)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Max matches per target (default: 1000, max: 10000)"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Skip first N matches (default: 0)"
+        }
+      },
+      "required": [
+        "type",
+        "targets"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "find_bytes",
+    "description": "Search for byte patterns in the binary (supports wildcards with ??)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "patterns": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Byte patterns to search for (e.g. '48 8B ?? ??')"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Max matches per pattern (default: 1000, max: 10000)"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Skip first N matches (default: 0)"
+        }
+      },
+      "required": [
+        "patterns"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "find_reads",
+    "description": "Find instructions that read from a memory target inside a function.\n\nTwo modes (pick one):\n- Absolute: addr + optional size\n- Struct field: base_reg + offset (matches [base+index*scale+disp])\n\nPrefer over xrefs_to for dynamic [reg+disp] accesses.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "in_function": {
+          "type": "string",
+          "description": "Function address to scan"
+        },
+        "addr": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absolute memory address start (hex)"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Byte size for absolute range (default: 1)"
+        },
+        "base_reg": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Base register for struct offset mode (e.g. rdi)"
+        },
+        "offset": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Struct field offset hex (e.g. 0x1C)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Max matches (default: 100, max: 500)"
+        }
+      },
+      "required": [
+        "in_function"
+      ]
+    },
+    "outputSchema": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "addr": {
+                "type": "string"
+              },
+              "insn": {
+                "type": "string"
+              },
+              "access": {
+                "type": "string"
+              },
+              "operand": {
+                "type": "integer"
+              },
+              "base_reg": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "offset": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "function": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        {
+          "type": "object"
+        }
+      ]
+    }
+  },
+  {
+    "name": "find_regex",
+    "description": "Search strings with case-insensitive regex patterns",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Regex pattern to search for in strings"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Max matches (default: 30, max: 500)"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Skip first N matches (default: 0)"
+        }
+      },
+      "required": [
+        "pattern"
+      ]
+    },
+    "outputSchema": {
+      "type": "object"
+    }
+  },
+  {
+    "name": "find_writes",
+    "description": "Find instructions that write to a memory target inside a function.\n\nTwo modes (pick one):\n- Absolute: addr + optional size\n- Struct field: base_reg + offset (matches [base+index*scale+disp])\n\nPrefer over xrefs_to for dynamic [reg+disp] accesses.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "in_function": {
+          "type": "string",
+          "description": "Function address to scan"
+        },
+        "addr": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absolute memory address start (hex)"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Byte size for absolute range (default: 1)"
+        },
+        "base_reg": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Base register for struct offset mode (e.g. rdi)"
+        },
+        "offset": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Struct field offset hex (e.g. 0x1C)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Max matches (default: 100, max: 500)"
+        }
+      },
+      "required": [
+        "in_function"
+      ]
+    },
+    "outputSchema": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "addr": {
+                "type": "string"
+              },
+              "insn": {
+                "type": "string"
+              },
+              "access": {
+                "type": "string"
+              },
+              "operand": {
+                "type": "integer"
+              },
+              "base_reg": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "offset": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "function": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        {
+          "type": "object"
+        }
+      ]
+    }
+  },
+  {
+    "name": "func_features",
+    "description": "Extract name-independent similarity features for functions, page by page.\n\nPer function returns: size, is_named, CFG metrics (bb/edge/complexity/loops/\ncallee/caller counts + out-degree sequence), a 64-perm instruction-shingle\nMinHash, external API (import) callees, referenced strings, non-trivial\nimmediate constants, and — only for named functions — pseudocode identifier\ntokens. Feed pages into the server-side similarity indexer. Use '*' to iterate\nall functions; only the page slice is analyzed so large binaries stay bounded.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Function addresses (comma-separated or list), or '*' for all"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Skip first N functions (default: 0)"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Max functions per page (default: 500, max: 2000)"
+        }
+      },
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "functions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "addr": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "is_named": {
+                "type": "boolean"
+              },
+              "size": {
+                "type": "integer"
+              },
+              "cfg": {
+                "type": "object",
+                "properties": {
+                  "bb_count": {
+                    "type": "integer"
+                  },
+                  "edge_count": {
+                    "type": "integer"
+                  },
+                  "complexity": {
+                    "type": "integer"
+                  },
+                  "loops": {
+                    "type": "integer"
+                  },
+                  "callee_count": {
+                    "type": "integer"
+                  },
+                  "caller_count": {
+                    "type": "integer"
+                  },
+                  "out_deg_seq": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "required": [
+                  "bb_count",
+                  "edge_count",
+                  "complexity",
+                  "loops",
+                  "callee_count",
+                  "caller_count",
+                  "out_deg_seq"
+                ],
+                "additionalProperties": false
+              },
+              "minhash": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "apis": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "strings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "consts": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "pseudo_tokens": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "total": {
+          "type": "integer"
+        },
+        "cursor": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "functions",
+        "total",
+        "cursor"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "func_profile",
+    "description": "Per-function profile: size, basic block count, cyclomatic complexity,\ncallee/caller counts, and string count. Useful for prioritizing which\nfunctions to analyze deeply. Fills the gap between list_funcs (too little\ninfo) and analyze_function (too expensive per call).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Function addresses (or '*' for all)"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Skip first N (default: 0)"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Max results (default: 100, max: 1000)"
+        },
+        "sort_by": {
+          "type": "string",
+          "description": "Sort key: size, complexity, xref_count, callee_count, name (default: size)"
+        },
+        "descending": {
+          "type": "boolean",
+          "description": "Sort descending (default: true)"
+        }
+      },
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object"
+    }
+  },
+  {
+    "name": "func_query",
+    "description": "Query functions with richer filtering than list_funcs. Supports regex\nname filter, size range, type filter, sort by size/name/addr, and pagination.\nExample: {name_regex: 'crypt', min_size: 100, sort_by: 'size', descending: true}",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "queries": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            {
+              "type": "object"
+            }
+          ],
+          "description": "Function query: filter, name_regex, min_size, max_size, has_type, sort_by, descending, offset, count"
+        }
+      },
+      "required": [
+        "queries"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "func_tokens",
+    "description": "Emit jTrans-style normalized instruction token streams per function, for a\nneural BCSD embedding backend. Uses IDA's own operand normalization (registers\nkept, stack vars -> var_xxx/arg_xxx, imm/disp -> CONST, intra-function jumps ->\nJUMP_ADDR_<idx>) -- which a byte/objdump reproduction cannot match. Paginated\nlike func_features; returns ``{addr: [token, ...]}``.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Function addresses (comma-separated or list), or '*' for all"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Skip first N functions (default: 0)"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Max functions per page (default: 500, max: 2000)"
+        }
+      },
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object"
+    }
+  },
+  {
+    "name": "get_bytes",
+    "description": "Read bytes from memory addresses",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "regions": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string",
+                    "description": "Address to read from (hex or decimal)"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "description": "Number of bytes to read"
+                  }
+                },
+                "required": [
+                  "addr",
+                  "size"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "Address to read from (hex or decimal)"
+                },
+                "size": {
+                  "type": "integer",
+                  "description": "Number of bytes to read"
+                }
+              },
+              "required": [
+                "addr",
+                "size"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "regions"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "get_global_value",
+    "description": "Read global variable values by address or name\n(auto-detects hex addresses vs names)",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -17,7 +2656,238 @@
               "type": "string"
             }
           ],
-          "description": "Address(es) or name(s)"
+          "description": "Global variable addresses or names to read values from"
+        }
+      },
+      "required": [
+        "queries"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "get_int",
+    "description": "Read integer values from memory addresses",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "queries": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string",
+                    "description": "Address to read from (hex or decimal)"
+                  },
+                  "ty": {
+                    "type": "string",
+                    "description": "Integer class (i8/u64/i16le/i16be/etc)"
+                  }
+                },
+                "required": [
+                  "addr",
+                  "ty"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "Address to read from (hex or decimal)"
+                },
+                "ty": {
+                  "type": "string",
+                  "description": "Integer class (i8/u64/i16le/i16be/etc)"
+                }
+              },
+              "required": [
+                "addr",
+                "ty"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "description": "Integer read requests (ty, addr). ty: i8/u64/i16le/i16be/etc"
+        }
+      },
+      "required": [
+        "queries"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "get_string",
+    "description": "Read strings from memory addresses",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Addresses to read strings from"
+        }
+      },
+      "required": [
+        "addrs"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "idb_save",
+    "description": "Save active IDB to disk. Call after renaming, retyping, or commenting\nto persist changes. Optionally specify a custom output path.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Optional destination path (default: current IDB path)"
+        }
+      },
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object"
+    }
+  },
+  {
+    "name": "imports",
+    "description": "List imports",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "offset": {
+          "type": "integer",
+          "description": "Offset"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Count (0=all)"
+        }
+      },
+      "required": [
+        "offset",
+        "count"
+      ]
+    },
+    "outputSchema": {
+      "type": "object"
+    }
+  },
+  {
+    "name": "imports_query",
+    "description": "Query imports with module and name filters. Example:\n{module: 'kernel32', filter: '*File*'} to find all kernel32 file I/O imports.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "queries": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            {
+              "type": "object"
+            }
+          ],
+          "description": "Import query: filter (import name pattern), module (module name pattern), offset, count"
+        }
+      },
+      "required": [
+        "queries"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "infer_types",
+    "description": "Infer types",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addrs": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Addresses to infer types for"
+        }
+      },
+      "required": [
+        "addrs"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "insn_query",
+    "description": "Search instructions by mnemonic and/or operand values within a function,\nsegment, or global scope. Uses existing scan infrastructure.\n\nPrefer this over py_eval when searching for instruction patterns (e.g.\n{mnem: 'call', func: '0x401000'} or {mnem: 'syscall'}).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "queries": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            {
+              "type": "object"
+            }
+          ],
+          "description": "Instruction pattern: mnem, op0, op1, op2, op_any, func, segment, offset, count"
         }
       },
       "required": [
@@ -79,6 +2949,21 @@
       "required": [
         "inputs"
       ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "list_enums",
+    "description": "List all local enums with member names and values.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
     },
     "outputSchema": {
       "type": "array",
@@ -222,649 +3107,8 @@
     }
   },
   {
-    "name": "refresh_caches",
-    "description": "Force-refresh all caches (strings, functions, globals). Call this after bulk modifications to ensure list_funcs/list_globals return fresh data.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {},
-      "required": []
-    },
-    "outputSchema": {
-      "type": "object",
-      "properties": {
-        "strings": {
-          "type": "integer"
-        },
-        "functions": {
-          "type": "integer"
-        },
-        "globals": {
-          "type": "integer"
-        },
-        "time_ms": {
-          "type": "integer"
-        }
-      },
-      "required": [
-        "strings",
-        "functions",
-        "globals",
-        "time_ms"
-      ]
-    }
-  },
-  {
-    "name": "imports",
-    "description": "List imports",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "offset": {
-          "type": "integer",
-          "description": "Offset"
-        },
-        "count": {
-          "type": "integer",
-          "description": "Count (0=all)"
-        }
-      },
-      "required": [
-        "offset",
-        "count"
-      ]
-    },
-    "outputSchema": {
-      "type": "object"
-    }
-  },
-  {
-    "name": "find_regex",
-    "description": "Search strings with case-insensitive regex patterns",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "pattern": {
-          "type": "string",
-          "description": "Regex pattern to search for in strings"
-        },
-        "limit": {
-          "type": "integer",
-          "description": "Max matches (default: 30, max: 500)"
-        },
-        "offset": {
-          "type": "integer",
-          "description": "Skip first N matches (default: 0)"
-        }
-      },
-      "required": [
-        "pattern"
-      ]
-    },
-    "outputSchema": {
-      "type": "object"
-    }
-  },
-  {
-    "name": "decompile",
-    "description": "Decompile function to pseudocode",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "addr": {
-          "type": "string",
-          "description": "Function address to decompile"
-        }
-      },
-      "required": [
-        "addr"
-      ]
-    },
-    "outputSchema": {
-      "type": "object"
-    }
-  },
-  {
-    "name": "disasm",
-    "description": "Disassemble function to assembly instructions",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "addr": {
-          "type": "string",
-          "description": "Function address to disassemble"
-        },
-        "max_instructions": {
-          "type": "integer",
-          "description": "Max instructions per function (default: 5000, max: 50000)"
-        },
-        "offset": {
-          "type": "integer",
-          "description": "Skip first N instructions (default: 0)"
-        },
-        "include_total": {
-          "type": "boolean",
-          "description": "Compute total instruction count (default: false)"
-        }
-      },
-      "required": [
-        "addr"
-      ]
-    },
-    "outputSchema": {
-      "type": "object"
-    }
-  },
-  {
-    "name": "xrefs_to",
-    "description": "Get cross-references to specified addresses",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "addrs": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Addresses to find cross-references to"
-        },
-        "limit": {
-          "type": "integer",
-          "description": "Max xrefs per address (default: 100, max: 1000)"
-        }
-      },
-      "required": [
-        "addrs"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "xrefs_to_field",
-    "description": "Get cross-references to structure fields",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "queries": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "struct": {
-                    "type": "string",
-                    "description": "Structure name"
-                  },
-                  "field": {
-                    "type": "string",
-                    "description": "Field name"
-                  }
-                },
-                "required": [
-                  "struct",
-                  "field"
-                ],
-                "additionalProperties": false
-              }
-            },
-            {
-              "type": "object",
-              "properties": {
-                "struct": {
-                  "type": "string",
-                  "description": "Structure name"
-                },
-                "field": {
-                  "type": "string",
-                  "description": "Field name"
-                }
-              },
-              "required": [
-                "struct",
-                "field"
-              ],
-              "additionalProperties": false
-            }
-          ]
-        },
-        "limit": {
-          "type": "integer",
-          "description": "Max xrefs per field (default: 100, max: 1000)"
-        }
-      },
-      "required": [
-        "queries"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "callees",
-    "description": "Get functions called by the specified functions",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "addrs": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Function addresses to get callees for"
-        },
-        "limit": {
-          "type": "integer",
-          "description": "Max callees per function (default: 200, max: 500)"
-        }
-      },
-      "required": [
-        "addrs"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "find_bytes",
-    "description": "Search for byte patterns in the binary (supports wildcards with ??)",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "patterns": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Byte patterns to search for (e.g. '48 8B ?? ??')"
-        },
-        "limit": {
-          "type": "integer",
-          "description": "Max matches per pattern (default: 1000, max: 10000)"
-        },
-        "offset": {
-          "type": "integer",
-          "description": "Skip first N matches (default: 0)"
-        }
-      },
-      "required": [
-        "patterns"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "basic_blocks",
-    "description": "Get control flow graph basic blocks for functions",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "addrs": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Function addresses to get basic blocks for"
-        },
-        "max_blocks": {
-          "type": "integer",
-          "description": "Max basic blocks per function (default: 1000, max: 10000)"
-        },
-        "offset": {
-          "type": "integer",
-          "description": "Skip first N blocks (default: 0)"
-        }
-      },
-      "required": [
-        "addrs"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "find",
-    "description": "Search for patterns in the binary (strings, immediate values, or references)",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string",
-          "description": "Search type: 'string', 'immediate', 'data_ref', or 'code_ref'"
-        },
-        "targets": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "integer"
-                  }
-                ]
-              }
-            },
-            {
-              "type": "string"
-            },
-            {
-              "type": "integer"
-            }
-          ],
-          "description": "Search targets (strings, integers, or addresses)"
-        },
-        "limit": {
-          "type": "integer",
-          "description": "Max matches per target (default: 1000, max: 10000)"
-        },
-        "offset": {
-          "type": "integer",
-          "description": "Skip first N matches (default: 0)"
-        }
-      },
-      "required": [
-        "type",
-        "targets"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "export_funcs",
-    "description": "Export function data in various formats",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "addrs": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Function addresses to export"
-        },
-        "format": {
-          "type": "string",
-          "description": "Export format: json (default), c_header, or prototypes"
-        }
-      },
-      "required": [
-        "addrs"
-      ]
-    },
-    "outputSchema": {
-      "type": "object"
-    }
-  },
-  {
-    "name": "callgraph",
-    "description": "Build call graph starting from root functions",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "roots": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Root function addresses to start call graph traversal from"
-        },
-        "max_depth": {
-          "type": "integer",
-          "description": "Maximum depth for call graph traversal"
-        },
-        "max_nodes": {
-          "type": "integer",
-          "description": "Max nodes across the graph (default: 1000, max: 100000)"
-        },
-        "max_edges": {
-          "type": "integer",
-          "description": "Max edges across the graph (default: 5000, max: 200000)"
-        },
-        "max_edges_per_func": {
-          "type": "integer",
-          "description": "Max edges per function (default: 200, max: 5000)"
-        }
-      },
-      "required": [
-        "roots"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "get_bytes",
-    "description": "Read bytes from memory addresses",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "regions": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "addr": {
-                    "type": "string",
-                    "description": "Address to read from (hex or decimal)"
-                  },
-                  "size": {
-                    "type": "integer",
-                    "description": "Number of bytes to read"
-                  }
-                },
-                "required": [
-                  "addr",
-                  "size"
-                ],
-                "additionalProperties": false
-              }
-            },
-            {
-              "type": "object",
-              "properties": {
-                "addr": {
-                  "type": "string",
-                  "description": "Address to read from (hex or decimal)"
-                },
-                "size": {
-                  "type": "integer",
-                  "description": "Number of bytes to read"
-                }
-              },
-              "required": [
-                "addr",
-                "size"
-              ],
-              "additionalProperties": false
-            }
-          ]
-        }
-      },
-      "required": [
-        "regions"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "get_int",
-    "description": "Read integer values from memory addresses",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "queries": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "addr": {
-                    "type": "string",
-                    "description": "Address to read from (hex or decimal)"
-                  },
-                  "ty": {
-                    "type": "string",
-                    "description": "Integer class (i8/u64/i16le/i16be/etc)"
-                  }
-                },
-                "required": [
-                  "addr",
-                  "ty"
-                ],
-                "additionalProperties": false
-              }
-            },
-            {
-              "type": "object",
-              "properties": {
-                "addr": {
-                  "type": "string",
-                  "description": "Address to read from (hex or decimal)"
-                },
-                "ty": {
-                  "type": "string",
-                  "description": "Integer class (i8/u64/i16le/i16be/etc)"
-                }
-              },
-              "required": [
-                "addr",
-                "ty"
-              ],
-              "additionalProperties": false
-            }
-          ],
-          "description": "Integer read requests (ty, addr). ty: i8/u64/i16le/i16be/etc"
-        }
-      },
-      "required": [
-        "queries"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "get_string",
-    "description": "Read strings from memory addresses",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "addrs": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Addresses to read strings from"
-        }
-      },
-      "required": [
-        "addrs"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "get_global_value",
-    "description": "Read global variable values by address or name\n    (auto-detects hex addresses vs names)",
+    "name": "lookup_funcs",
+    "description": "Get functions by address or name (auto-detects)",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -880,7 +3124,7 @@
               "type": "string"
             }
           ],
-          "description": "Global variable addresses or names to read values from"
+          "description": "Address(es) or name(s)"
         }
       },
       "required": [
@@ -946,6 +3190,67 @@
       },
       "required": [
         "patches"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "patch_asm",
+    "description": "Patch assembly instructions at addresses",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string",
+                    "description": "Address (hex or decimal)"
+                  },
+                  "asm": {
+                    "type": "string",
+                    "description": "Assembly instruction(s), semicolon-separated"
+                  }
+                },
+                "required": [
+                  "addr",
+                  "asm"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "Address (hex or decimal)"
+                },
+                "asm": {
+                  "type": "string",
+                  "description": "Assembly instruction(s), semicolon-separated"
+                }
+              },
+              "required": [
+                "addr",
+                "asm"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "items"
       ]
     },
     "outputSchema": {
@@ -1028,40 +3333,27 @@
     }
   },
   {
-    "name": "declare_type",
-    "description": "Declare types",
+    "name": "py_eval",
+    "description": "Execute Python code in IDA context.\nReturns dict with result/stdout/stderr.\nHas access to all IDA API modules.\nSupports Jupyter-style evaluation.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "decls": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "C type declarations"
+        "code": {
+          "type": "string",
+          "description": "Python code"
         }
       },
       "required": [
-        "decls"
+        "code"
       ]
     },
     "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
+      "type": "object"
     }
   },
   {
     "name": "read_struct",
-    "description": "Reads struct type definition and parses actual memory values at the\n    given address as instances of that struct type.\n\n    If struct name is not provided, attempts to auto-detect from address.\n    Auto-detection only works if IDA already has type information applied\n    at that address\n\n    Returns struct layout with actual memory values for each field.",
+    "description": "Reads struct type definition and parses actual memory values at the\ngiven address as instances of that struct type.\n\nIf struct name is not provided, attempts to auto-detect from address.\nAuto-detection only works if IDA already has type information applied\nat that address\n\nReturns struct layout with actual memory values for each field.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1115,260 +3407,15 @@
     }
   },
   {
-    "name": "search_structs",
-    "description": "Search structs",
+    "name": "refresh_caches",
+    "description": "Force-refresh all caches (strings, functions, globals).",
     "inputSchema": {
       "type": "object",
-      "properties": {
-        "filter": {
-          "type": "string",
-          "description": "Case-insensitive substring to search for in structure names"
-        }
-      },
-      "required": [
-        "filter"
-      ]
+      "properties": {},
+      "required": []
     },
     "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "set_type",
-    "description": "Apply types (function/global/local/stack)",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "edits": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "addr": {
-                    "type": "string",
-                    "description": "Memory address"
-                  },
-                  "name": {
-                    "type": "string",
-                    "description": "Variable/function name"
-                  },
-                  "ty": {
-                    "type": "string",
-                    "description": "Type name or declaration"
-                  },
-                  "kind": {
-                    "type": "string",
-                    "description": "Type of entity (auto-detected if omitted)"
-                  },
-                  "signature": {
-                    "type": "string",
-                    "description": "Function signature (for kind=function)"
-                  },
-                  "variable": {
-                    "type": "string",
-                    "description": "Local variable name (for kind=local)"
-                  }
-                },
-                "required": [],
-                "additionalProperties": false
-              }
-            },
-            {
-              "type": "object",
-              "properties": {
-                "addr": {
-                  "type": "string",
-                  "description": "Memory address"
-                },
-                "name": {
-                  "type": "string",
-                  "description": "Variable/function name"
-                },
-                "ty": {
-                  "type": "string",
-                  "description": "Type name or declaration"
-                },
-                "kind": {
-                  "type": "string",
-                  "description": "Type of entity (auto-detected if omitted)"
-                },
-                "signature": {
-                  "type": "string",
-                  "description": "Function signature (for kind=function)"
-                },
-                "variable": {
-                  "type": "string",
-                  "description": "Local variable name (for kind=local)"
-                }
-              },
-              "required": [],
-              "additionalProperties": false
-            }
-          ]
-        }
-      },
-      "required": [
-        "edits"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "infer_types",
-    "description": "Infer types",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "addrs": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Addresses to infer types for"
-        }
-      },
-      "required": [
-        "addrs"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    }
-  },
-  {
-    "name": "set_comments",
-    "description": "Set comments at addresses (both disassembly and decompiler views)",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "addr": {
-                    "type": "string",
-                    "description": "Address (hex or decimal)"
-                  },
-                  "comment": {
-                    "type": "string",
-                    "description": "Comment text"
-                  }
-                },
-                "required": [
-                  "addr",
-                  "comment"
-                ],
-                "additionalProperties": false
-              }
-            },
-            {
-              "type": "object",
-              "properties": {
-                "addr": {
-                  "type": "string",
-                  "description": "Address (hex or decimal)"
-                },
-                "comment": {
-                  "type": "string",
-                  "description": "Comment text"
-                }
-              },
-              "required": [
-                "addr",
-                "comment"
-              ],
-              "additionalProperties": false
-            }
-          ]
-        }
-      },
-      "required": [
-        "items"
-      ]
-    }
-  },
-  {
-    "name": "patch_asm",
-    "description": "Patch assembly instructions at addresses",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "addr": {
-                    "type": "string",
-                    "description": "Address (hex or decimal)"
-                  },
-                  "asm": {
-                    "type": "string",
-                    "description": "Assembly instruction(s), semicolon-separated"
-                  }
-                },
-                "required": [
-                  "addr",
-                  "asm"
-                ],
-                "additionalProperties": false
-              }
-            },
-            {
-              "type": "object",
-              "properties": {
-                "addr": {
-                  "type": "string",
-                  "description": "Address (hex or decimal)"
-                },
-                "asm": {
-                  "type": "string",
-                  "description": "Assembly instruction(s), semicolon-separated"
-                }
-              },
-              "required": [
-                "addr",
-                "asm"
-              ],
-              "additionalProperties": false
-            }
-          ]
-        }
-      },
-      "required": [
-        "items"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
+      "type": "object"
     }
   },
   {
@@ -1602,8 +3649,67 @@
     }
   },
   {
-    "name": "append_comments",
-    "description": "Append comments at addresses, deduping exact text by default. Unlike\n    set_comments (which overwrites), this preserves existing annotations \u2014 use\n    it for incremental commentary. scope='auto' (default) writes a function\n    comment when addr is a function start, otherwise a line comment; force\n    with scope='func' or 'line'. dedupe=True skips writes when the exact\n    stripped text already appears on its own line.",
+    "name": "search_structs",
+    "description": "Search structs",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "filter": {
+          "type": "string",
+          "description": "Case-insensitive substring to search for in structure names"
+        }
+      },
+      "required": [
+        "filter"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "server_health",
+    "description": "Health/ready probe for MCP server and current IDB state. Returns\nuptime, IDB path, auto-analysis status, Hex-Rays availability, and\nstrings cache state.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object"
+    }
+  },
+  {
+    "name": "server_warmup",
+    "description": "Warm up IDA subsystems to reduce first-call latency. Call after\nconnecting to a new instance to ensure analysis is complete and caches\nare populated before running tools.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "wait_auto_analysis": {
+          "type": "boolean",
+          "description": "Wait for auto analysis queue"
+        },
+        "build_caches": {
+          "type": "boolean",
+          "description": "Build core caches (currently strings)"
+        },
+        "init_hexrays": {
+          "type": "boolean",
+          "description": "Initialize Hex-Rays decompiler plugin"
+        }
+      },
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object"
+    }
+  },
+  {
+    "name": "set_comments",
+    "description": "Set comments at addresses (both disassembly and decompiler views)",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1620,15 +3726,7 @@
                   },
                   "comment": {
                     "type": "string",
-                    "description": "Comment text to append"
-                  },
-                  "scope": {
-                    "type": "string",
-                    "description": "auto|func|line (default: auto)"
-                  },
-                  "dedupe": {
-                    "type": "boolean",
-                    "description": "Skip if exact text already exists (default: true)"
+                    "description": "Comment text"
                   }
                 },
                 "required": [
@@ -1647,15 +3745,7 @@
                 },
                 "comment": {
                   "type": "string",
-                  "description": "Comment text to append"
-                },
-                "scope": {
-                  "type": "string",
-                  "description": "auto|func|line (default: auto)"
-                },
-                "dedupe": {
-                  "type": "boolean",
-                  "description": "Skip if exact text already exists (default: true)"
+                  "description": "Comment text"
                 }
               },
               "required": [
@@ -1670,40 +3760,15 @@
       "required": [
         "items"
       ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "addr": {
-            "type": "string"
-          },
-          "scope": {
-            "type": "string"
-          },
-          "appended": {
-            "type": "boolean"
-          },
-          "skipped": {
-            "type": "boolean"
-          },
-          "error": {
-            "type": "string"
-          }
-        },
-        "required": [],
-        "additionalProperties": false
-      }
     }
   },
   {
-    "name": "define_func",
-    "description": "Define a function at each given address. IDA infers bounds unless an\n    explicit end address is provided. Returns {addr, start, end} on success or\n    {addr, start, error} if the function already exists or add_func fails.\n    Use this when IDA auto-analysis missed a function entry point.",
+    "name": "set_type",
+    "description": "Apply types (function/global/local/stack)",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "items": {
+        "edits": {
           "anyOf": [
             {
               "type": "array",
@@ -1712,11 +3777,27 @@
                 "properties": {
                   "addr": {
                     "type": "string",
-                    "description": "Address to define (hex or decimal)"
+                    "description": "Memory address"
                   },
-                  "end": {
+                  "name": {
                     "type": "string",
-                    "description": "Optional end address for explicit bounds"
+                    "description": "Variable/function name"
+                  },
+                  "ty": {
+                    "type": "string",
+                    "description": "Type name or declaration"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "description": "Type of entity (auto-detected if omitted)"
+                  },
+                  "signature": {
+                    "type": "string",
+                    "description": "Function signature (for kind=function)"
+                  },
+                  "variable": {
+                    "type": "string",
+                    "description": "Local variable name (for kind=local)"
                   }
                 },
                 "required": [],
@@ -1728,11 +3809,27 @@
               "properties": {
                 "addr": {
                   "type": "string",
-                  "description": "Address to define (hex or decimal)"
+                  "description": "Memory address"
                 },
-                "end": {
+                "name": {
                   "type": "string",
-                  "description": "Optional end address for explicit bounds"
+                  "description": "Variable/function name"
+                },
+                "ty": {
+                  "type": "string",
+                  "description": "Type name or declaration"
+                },
+                "kind": {
+                  "type": "string",
+                  "description": "Type of entity (auto-detected if omitted)"
+                },
+                "signature": {
+                  "type": "string",
+                  "description": "Function signature (for kind=function)"
+                },
+                "variable": {
+                  "type": "string",
+                  "description": "Local variable name (for kind=local)"
                 }
               },
               "required": [],
@@ -1742,206 +3839,13 @@
         }
       },
       "required": [
-        "items"
+        "edits"
       ]
     },
     "outputSchema": {
       "type": "array",
       "items": {
-        "type": "object",
-        "properties": {
-          "addr": {
-            "type": "string"
-          },
-          "ea": {
-            "type": "string"
-          },
-          "start": {
-            "type": "string"
-          },
-          "end": {
-            "type": "string"
-          },
-          "size": {
-            "type": "integer"
-          },
-          "length": {
-            "type": "integer"
-          },
-          "error": {
-            "type": "string"
-          }
-        },
-        "required": [],
-        "additionalProperties": false
-      }
-    }
-  },
-  {
-    "name": "define_code",
-    "description": "Convert raw bytes to a code instruction at each given address. Returns\n    {addr, ea, length} on success (length is the instruction byte length) or\n    {addr, ea, error} if create_insn failed. Use this when IDA classified an\n    instruction as data or failed to decode.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "addr": {
-                    "type": "string",
-                    "description": "Address to define (hex or decimal)"
-                  },
-                  "end": {
-                    "type": "string",
-                    "description": "Optional end address for explicit bounds"
-                  }
-                },
-                "required": [],
-                "additionalProperties": false
-              }
-            },
-            {
-              "type": "object",
-              "properties": {
-                "addr": {
-                  "type": "string",
-                  "description": "Address to define (hex or decimal)"
-                },
-                "end": {
-                  "type": "string",
-                  "description": "Optional end address for explicit bounds"
-                }
-              },
-              "required": [],
-              "additionalProperties": false
-            }
-          ]
-        }
-      },
-      "required": [
-        "items"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "addr": {
-            "type": "string"
-          },
-          "ea": {
-            "type": "string"
-          },
-          "start": {
-            "type": "string"
-          },
-          "end": {
-            "type": "string"
-          },
-          "size": {
-            "type": "integer"
-          },
-          "length": {
-            "type": "integer"
-          },
-          "error": {
-            "type": "string"
-          }
-        },
-        "required": [],
-        "additionalProperties": false
-      }
-    }
-  },
-  {
-    "name": "undefine",
-    "description": "Undefine item(s) at each address, converting them back to raw bytes.\n    Size is determined from `end` (exclusive) or `size`; defaults to 1 byte.\n    Uses ida_bytes.DELIT_EXPAND so adjacent items spanning into the range are\n    fully removed. Returns {addr, start, size} on success.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "addr": {
-                    "type": "string",
-                    "description": "Address to undefine (hex or decimal)"
-                  },
-                  "end": {
-                    "type": "string",
-                    "description": "Optional end address"
-                  },
-                  "size": {
-                    "type": "integer",
-                    "description": "Optional size in bytes"
-                  }
-                },
-                "required": [],
-                "additionalProperties": false
-              }
-            },
-            {
-              "type": "object",
-              "properties": {
-                "addr": {
-                  "type": "string",
-                  "description": "Address to undefine (hex or decimal)"
-                },
-                "end": {
-                  "type": "string",
-                  "description": "Optional end address"
-                },
-                "size": {
-                  "type": "integer",
-                  "description": "Optional size in bytes"
-                }
-              },
-              "required": [],
-              "additionalProperties": false
-            }
-          ]
-        }
-      },
-      "required": [
-        "items"
-      ]
-    },
-    "outputSchema": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "addr": {
-            "type": "string"
-          },
-          "ea": {
-            "type": "string"
-          },
-          "start": {
-            "type": "string"
-          },
-          "end": {
-            "type": "string"
-          },
-          "size": {
-            "type": "integer"
-          },
-          "length": {
-            "type": "integer"
-          },
-          "error": {
-            "type": "string"
-          }
-        },
-        "required": [],
-        "additionalProperties": false
+        "type": "object"
       }
     }
   },
@@ -1978,157 +3882,73 @@
     }
   },
   {
-    "name": "declare_stack",
-    "description": "Create stack vars",
+    "name": "struct_infer",
+    "description": "Infer struct field offsets from [base+disp] memory access patterns.\n\nScans a function for displacements off base_register (e.g. this=rcx)\nand aggregates read/write counts per offset. Does not apply types.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "items": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "addr": {
-                    "type": "string",
-                    "description": "Function address"
-                  },
-                  "offset": {
-                    "type": "string",
-                    "description": "Stack offset"
-                  },
-                  "name": {
-                    "type": "string",
-                    "description": "Variable name"
-                  },
-                  "ty": {
-                    "type": "string",
-                    "description": "Type name"
-                  }
-                },
-                "required": [
-                  "addr",
-                  "offset",
-                  "name",
-                  "ty"
-                ],
-                "additionalProperties": false
-              }
-            },
-            {
-              "type": "object",
-              "properties": {
-                "addr": {
-                  "type": "string",
-                  "description": "Function address"
-                },
-                "offset": {
-                  "type": "string",
-                  "description": "Stack offset"
-                },
-                "name": {
-                  "type": "string",
-                  "description": "Variable name"
-                },
-                "ty": {
-                  "type": "string",
-                  "description": "Type name"
-                }
-              },
-              "required": [
-                "addr",
-                "offset",
-                "name",
-                "ty"
-              ],
-              "additionalProperties": false
-            }
-          ]
-        }
-      },
-      "required": [
-        "items"
-      ]
-    }
-  },
-  {
-    "name": "delete_stack",
-    "description": "Delete stack vars",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "addr": {
-                    "type": "string",
-                    "description": "Function address"
-                  },
-                  "name": {
-                    "type": "string",
-                    "description": "Variable name"
-                  }
-                },
-                "required": [
-                  "addr",
-                  "name"
-                ],
-                "additionalProperties": false
-              }
-            },
-            {
-              "type": "object",
-              "properties": {
-                "addr": {
-                  "type": "string",
-                  "description": "Function address"
-                },
-                "name": {
-                  "type": "string",
-                  "description": "Variable name"
-                }
-              },
-              "required": [
-                "addr",
-                "name"
-              ],
-              "additionalProperties": false
-            }
-          ]
-        }
-      },
-      "required": [
-        "items"
-      ]
-    }
-  },
-  {
-    "name": "py_eval",
-    "description": "Execute Python code in IDA context.\n    Returns dict with result/stdout/stderr.\n    Has access to all IDA API modules.\n    Supports Jupyter-style evaluation.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "code": {
+        "addr": {
           "type": "string",
-          "description": "Python code"
+          "description": "Function address or name"
+        },
+        "base_register": {
+          "type": "string",
+          "description": "Struct base register (default: rcx for x64 this)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Max fields returned (default: 200)"
         }
       },
       "required": [
-        "code"
+        "addr"
       ]
     },
     "outputSchema": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "function": {
+          "type": "string"
+        },
+        "base_register": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "offset": {
+                "type": "string"
+              },
+              "access_count": {
+                "type": "integer"
+              },
+              "reads": {
+                "type": "integer"
+              },
+              "writes": {
+                "type": "integer"
+              },
+              "sample_insn": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
     }
   },
   {
     "name": "survey_binary",
-    "description": "Get a compact overview of the binary in one call. Returns file metadata,\n    segment layout, entry points, statistics, top 15 strings and functions ranked\n    by xref count (functions include classification: thunk/wrapper/leaf/dispatcher/\n    complex), imports by category, and call graph summary. Use this as your FIRST\n    tool call when starting analysis. Do not call list_funcs, imports, or find_regex\n    separately for triage \u2014 this returns all of that. Use detail_level='minimal'\n    for binaries with >10k functions.",
+    "description": "Get a compact overview of the binary in one call. Returns file metadata,\nsegment layout, entry points, statistics, top 15 strings and functions ranked\nby xref count (functions include classification: thunk/wrapper/leaf/dispatcher/\ncomplex), imports by category, and call graph summary. Use this as your FIRST\ntool call when starting analysis. Do not call list_funcs, imports, or find_regex\nseparately for triage — this returns all of that. Use detail_level='minimal'\nfor binaries with >10k functions.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2510,376 +4330,8 @@
     }
   },
   {
-    "name": "analyze_function",
-    "description": "Compact single-function analysis: pseudocode (capped at 100 lines), top\n    strings, top non-trivial constants, callers, callees, xrefs, comments, and\n    basic block summary. Use this for \"tell me everything about function X\" in\n    one call instead of chaining decompile + callees + xrefs_to separately.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "addr": {
-          "type": "string",
-          "description": "Function address or name"
-        },
-        "include_asm": {
-          "type": "boolean",
-          "description": "Include full disassembly (default: false, saves tokens)"
-        }
-      },
-      "required": [
-        "addr"
-      ]
-    },
-    "outputSchema": {
-      "type": "object",
-      "properties": {
-        "addr": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "prototype": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "size": {
-          "type": "integer"
-        },
-        "decompiled": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "decompile_truncated": {
-          "type": "integer"
-        },
-        "assembly": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "strings": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "constants": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object"
-            }
-          }
-        },
-        "callees": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "callers": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "xrefs": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "object"
-          }
-        },
-        "comments": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "object"
-          }
-        },
-        "basic_blocks": {
-          "type": "object",
-          "properties": {
-            "count": {
-              "type": "integer"
-            },
-            "cyclomatic_complexity": {
-              "type": "integer"
-            }
-          },
-          "required": [
-            "count",
-            "cyclomatic_complexity"
-          ],
-          "additionalProperties": false
-        },
-        "error": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "analyze_component",
-    "description": "Analyze related functions as a group: per-function compact summaries,\n    internal call graph (edges only between supplied functions), shared globals,\n    interface vs internal classification, and strings used by multiple members.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "addrs": {
-          "anyOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Function addresses (comma-separated or list)"
-        }
-      },
-      "required": [
-        "addrs"
-      ]
-    },
-    "outputSchema": {
-      "type": "object",
-      "properties": {
-        "functions": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "addr": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "prototype": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "size": {
-                "type": "integer"
-              },
-              "callees": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "strings": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "basic_blocks": {
-                "type": "integer"
-              },
-              "complexity": {
-                "type": "integer"
-              },
-              "error": {
-                "type": "string"
-              }
-            },
-            "required": [],
-            "additionalProperties": false
-          }
-        },
-        "internal_call_graph": {
-          "type": "object",
-          "properties": {
-            "nodes": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "edges": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "from": {
-                    "type": "string"
-                  },
-                  "to": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "from",
-                  "to",
-                  "name"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "nodes",
-            "edges"
-          ],
-          "additionalProperties": false
-        },
-        "shared_globals": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "addr": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "accessed_by": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            },
-            "required": [
-              "addr",
-              "name",
-              "accessed_by"
-            ],
-            "additionalProperties": false
-          }
-        },
-        "interface_functions": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "internal_only": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "string_usage": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "error": {
-          "type": "string"
-        }
-      },
-      "required": [],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "diff_before_after",
-    "description": "Apply a rename/type/comment action and return the before/after decompilation\n    side by side. Actions: 'rename_func' ({name}), 'set_type' ({type}),\n    'set_comment' ({comment}). Useful to verify a rename or type change actually\n    improved readability. Returns {before, after, action_applied, changes_detected}.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "addr": {
-          "type": "string",
-          "description": "Function address"
-        },
-        "action": {
-          "type": "string",
-          "description": "Action: 'rename_func', 'set_type', 'set_comment'"
-        },
-        "action_args": {
-          "type": "object",
-          "description": "Arguments for the action"
-        }
-      },
-      "required": [
-        "addr",
-        "action",
-        "action_args"
-      ]
-    },
-    "outputSchema": {
-      "type": "object",
-      "properties": {
-        "before": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "after": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "action_applied": {
-          "type": "string"
-        },
-        "changes_detected": {
-          "type": "boolean"
-        },
-        "error": {
-          "type": "string"
-        }
-      },
-      "required": [],
-      "additionalProperties": false
-    }
-  },
-  {
     "name": "trace_data_flow",
-    "description": "Follow cross-references from or to an address, automatically traversing\n    multiple hops. 'forward' follows xrefs-from, 'backward' follows xrefs-to.\n    Returns nodes (with function name, instruction, code/data classification) and\n    edges. Do not use for call graph traversal \u2014 use callgraph for that.",
+    "description": "Follow cross-references from or to an address, automatically traversing\nmultiple hops. 'forward' follows xrefs-from, 'backward' follows xrefs-to.\nReturns nodes (with function name, instruction, code/data classification) and\nedges. Do not use for call graph traversal — use callgraph for that.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3000,8 +4452,216 @@
     }
   },
   {
-    "name": "func_features",
-    "description": "Extract name-independent similarity features for functions, page by page. Per function: size, is_named, CFG metrics (bb/edge/complexity/loops/callee/caller counts + out-degree sequence), a 64-perm instruction-shingle MinHash, external API (import) callees, referenced strings, non-trivial immediate constants, and (named functions only) pseudocode identifier tokens. Use '*' for all functions; only the page slice is analyzed so large binaries stay bounded.",
+    "name": "trace_value",
+    "description": "Trace a register's definitions and uses within a single function.\n\nReturns instruction-level def-use sites (no cross-function propagation).\nPrefer over chaining disasm + manual scanning for register semantics.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "addr": {
+          "type": "string",
+          "description": "Function address or name"
+        },
+        "variable": {
+          "type": "string",
+          "description": "Register name to trace (e.g. r13, rax, rdi)"
+        },
+        "direction": {
+          "type": "string",
+          "description": "'forward' or 'backward' (default: forward)"
+        }
+      },
+      "required": [
+        "addr",
+        "variable"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "variable": {
+          "type": "string"
+        },
+        "function": {
+          "type": "string"
+        },
+        "direction": {
+          "type": "string"
+        },
+        "definitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "addr": {
+                "type": "string"
+              },
+              "insn": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "uses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "addr": {
+                "type": "string"
+              },
+              "insn": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "undefine",
+    "description": "Undefine item(s) at each address, converting them back to raw bytes.\nSize is determined from `end` (exclusive) or `size`; defaults to 1 byte.\nUses ida_bytes.DELIT_EXPAND so adjacent items spanning into the range are\nfully removed. Returns {addr, start, size} on success.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "addr": {
+                    "type": "string",
+                    "description": "Address to undefine (hex or decimal)"
+                  },
+                  "end": {
+                    "type": "string",
+                    "description": "Optional end address"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "description": "Optional size in bytes"
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "Address to undefine (hex or decimal)"
+                },
+                "end": {
+                  "type": "string",
+                  "description": "Optional end address"
+                },
+                "size": {
+                  "type": "integer",
+                  "description": "Optional size in bytes"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "type": "string"
+          },
+          "ea": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "length": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "name": "xref_query",
+    "description": "Query cross-references with direction and type filters.\ndirection='to' finds refs TO addr, 'from' finds refs FROM addr, 'both' finds all.\ntype_filter='code' shows only code xrefs, 'data' only data, 'all' shows both.\nSupports dedup and pagination.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "queries": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            {
+              "type": "object"
+            }
+          ],
+          "description": "Xref query: addr, direction (to/from/both), type_filter (code/data/all), offset, count"
+        }
+      },
+      "required": [
+        "queries"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "xrefs_from",
+    "description": "Get cross-references from specified addresses (symmetric with xrefs_to).\nReturns outgoing code and data references for each address.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3017,38 +4677,27 @@
               "type": "string"
             }
           ],
-          "description": "Function addresses (comma-separated or list), or '*' for all"
+          "description": "Addresses to find cross-references from"
         },
-        "offset": {
+        "limit": {
           "type": "integer",
-          "description": "Skip first N functions (default: 0)"
-        },
-        "count": {
-          "type": "integer",
-          "description": "Max functions per page (default: 500, max: 2000)"
+          "description": "Max xrefs per address (default: 100, max: 1000)"
         }
       },
-      "required": []
+      "required": [
+        "addrs"
+      ]
     },
     "outputSchema": {
-      "type": "object"
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
     }
   },
   {
-    "name": "binary_fingerprint",
-    "description": "Content fingerprint of the loaded binary for similarity index keying: input file sha256 and md5 (hex, or null if unavailable), total function count, and an arch label (e.g. 'x86_64').",
-    "inputSchema": {
-      "type": "object",
-      "properties": {},
-      "required": []
-    },
-    "outputSchema": {
-      "type": "object"
-    }
-  },
-  {
-    "name": "func_tokens",
-    "description": "Emit jTrans-style normalized instruction token streams per function (for a neural BCSD embedding backend), page by page. Uses IDA's operand normalization: registers kept, immediates/displacements -> CONST, stack vars -> var_xxx/arg_xxx, intra-function jumps -> JUMP_ADDR_<idx>. Use '*' for all functions; only the page slice is analyzed. Returns {addr: [token, ...]}.",
+    "name": "xrefs_to",
+    "description": "Get cross-references to specified addresses",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3064,21 +4713,87 @@
               "type": "string"
             }
           ],
-          "description": "Function addresses (comma-separated or list), or '*' for all"
+          "description": "Addresses to find cross-references to"
         },
-        "offset": {
+        "limit": {
           "type": "integer",
-          "description": "Skip first N functions (default: 0)"
-        },
-        "count": {
-          "type": "integer",
-          "description": "Max functions per page (default: 500, max: 2000)"
+          "description": "Max xrefs per address (default: 100, max: 1000)"
         }
       },
-      "required": []
+      "required": [
+        "addrs"
+      ]
     },
     "outputSchema": {
-      "type": "object"
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  {
+    "name": "xrefs_to_field",
+    "description": "Get cross-references to structure fields",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "queries": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "struct": {
+                    "type": "string",
+                    "description": "Structure name"
+                  },
+                  "field": {
+                    "type": "string",
+                    "description": "Field name"
+                  }
+                },
+                "required": [
+                  "struct",
+                  "field"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "object",
+              "properties": {
+                "struct": {
+                  "type": "string",
+                  "description": "Structure name"
+                },
+                "field": {
+                  "type": "string",
+                  "description": "Field name"
+                }
+              },
+              "required": [
+                "struct",
+                "field"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Max xrefs per field (default: 100, max: 1000)"
+        }
+      },
+      "required": [
+        "queries"
+      ]
+    },
+    "outputSchema": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
     }
   }
 ]

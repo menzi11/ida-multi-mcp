@@ -1,6 +1,6 @@
-# Documentation Hub
+﻿# Documentation Hub
 
-Last updated: 2026-02-17
+Last updated: 2026-07-12
 Status: Active
 
 This document is the entry point for the `ida-multi-mcp` documentation.
@@ -24,6 +24,7 @@ This document is the entry point for the `ida-multi-mcp` documentation.
 - Architecture: `docs/.ssot/architectures/00_INDEX.md`
 - SSOT TODO: `docs/.ssot/TODO.md`
 - Ops roadmap: `docs/ops/ROADMAP.md`
+- Agent tool selection: `docs/ops/mcp-tool-selection.md`
 - Installation guide: `docs/installation.md`
 
 ## Applicability Snapshot

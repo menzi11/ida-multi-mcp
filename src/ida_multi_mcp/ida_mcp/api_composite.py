@@ -1,4 +1,4 @@
-"""Composite analysis tools that aggregate multiple data sources.
+﻿"""Composite analysis tools that aggregate multiple data sources.
 
 Ported from upstream `ida-pro-mcp` `api_composite.py` (v2.0.0). Adapted:
 - No `_parse_function_tinfo` helper in this project's `api_types`; `diff_before_after`
@@ -10,10 +10,13 @@ Ported from upstream `ida-pro-mcp` `api_composite.py` (v2.0.0). Adapted:
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from typing import Annotated, Any, TypedDict
+import difflib
+from typing import Annotated, Callable, TypedDict
 
 import ida_hexrays
 import ida_typeinf
+import ida_ua
+import ida_bytes
 import idaapi
 import idautils
 import idc
@@ -35,7 +38,9 @@ from .utils import (
 )
 
 
-_DECOMPILE_LINE_CAP = 100
+_DECOMPILE_LINE_CAP_DEFAULT = 600
+_DECOMPILE_TREE_MAX_DEPTH_DEFAULT = 2
+_DECOMPILE_TREE_MAX_NODES_DEFAULT = 30
 _TOP_STRINGS = 10
 _TOP_CONSTANTS = 10
 # Cap on the shared-string map returned by analyze_component. Sorted by
@@ -50,22 +55,98 @@ class BasicBlockSummary(TypedDict):
     cyclomatic_complexity: int
 
 
+class XrefEntry(TypedDict):
+    addr: str
+    type: str
+
+
+FunctionXrefs = TypedDict(
+    "FunctionXrefs",
+    {"to": list[XrefEntry], "from": list[XrefEntry]},
+)
+
+
+class CommentEntry(TypedDict, total=False):
+    regular: str
+    repeatable: str
+
+
+class ConstantEntry(TypedDict):
+    addr: str
+    value: str
+    decimal: int
+
+
 class AnalyzeFunctionResult(TypedDict, total=False):
     addr: str
     name: str
     prototype: str | None
     size: int
     decompiled: str | None
+    decompile_lines: int
     decompile_truncated: int
     assembly: str | None
     strings: list[str]
-    constants: list[dict[str, Any]]
+    constants: list[ConstantEntry]
     callees: list[str]
     callers: list[str]
-    xrefs: dict[str, Any]
-    comments: dict[str, Any]
+    xrefs: FunctionXrefs
+    comments: dict[str, CommentEntry]
     basic_blocks: BasicBlockSummary
     error: str | None
+
+
+class DecompileTreeNode(TypedDict, total=False):
+    addr: str
+    name: str
+    depth: int
+    pseudocode: str | None
+    decompile_lines: int
+    decompile_truncated: int
+    assembly: str | None
+
+
+DecompileTreeEdge = TypedDict(
+    "DecompileTreeEdge",
+    {"from": str, "to": str},
+)
+
+
+class DecompileTreeStats(TypedDict):
+    decompiled: int
+    stubbed: int
+    deduped: int
+    total_discovered: int
+
+
+class DecompileTreeResult(TypedDict, total=False):
+    root: str
+    depth: int
+    nodes: list[DecompileTreeNode]
+    edges: list[DecompileTreeEdge]
+    stubs: list[str]
+    stats: DecompileTreeStats
+    error: str
+
+
+class DiffFunctionsResult(TypedDict, total=False):
+    addr_a: str
+    addr_b: str
+    name_a: str
+    name_b: str
+    pseudocode_changed: bool
+    unified_diff: str
+    constants: dict[str, list[str]]
+    error: str
+
+
+class CallPathResult(TypedDict, total=False):
+    from_addr: str
+    to_addr: str
+    paths: list[list[str]]
+    path_strings: list[str]
+    count: int
+    error: str
 
 
 class ComponentFunctionSummary(TypedDict, total=False):
@@ -139,6 +220,22 @@ class TraceDataFlowResult(TypedDict, total=False):
     error: str
 
 
+class TraceValueSite(TypedDict, total=False):
+    addr: str
+    insn: str
+    source: str
+    role: str
+
+
+class TraceValueResult(TypedDict, total=False):
+    variable: str
+    function: str
+    direction: str
+    definitions: list[TraceValueSite]
+    uses: list[TraceValueSite]
+    error: str
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers (called from within @idasync context)
 # ---------------------------------------------------------------------------
@@ -171,35 +268,194 @@ def _basic_block_info(ea: int) -> BasicBlockSummary:
     return {"count": nodes, "cyclomatic_complexity": edges - nodes + 2}
 
 
-def _filter_constants(raw: list[dict], limit: int = _TOP_CONSTANTS) -> list[dict]:
+def _filter_constants(raw: list[dict], limit: int = _TOP_CONSTANTS) -> list[ConstantEntry]:
     """Drop boring constants, return top N by absolute value."""
-    out = []
+    out: list[ConstantEntry] = []
     for c in raw:
-        val = c.get("value", 0)
-        if not isinstance(val, int):
+        val = c.get("decimal")
+        if val is None:
             continue
+        if not isinstance(val, int):
+            try:
+                val = int(val)
+            except (TypeError, ValueError):
+                continue
         if abs(val) < 0x100 or val in _BORING_CONSTANTS:
             continue
-        out.append(c)
-    out.sort(
-        key=lambda c: abs(c.get("value", 0)) if isinstance(c.get("value"), int) else 0,
-        reverse=True,
-    )
+        out.append({
+            "addr": str(c.get("addr", "")),
+            "value": str(c.get("value", hex(val))),
+            "decimal": val,
+        })
+    out.sort(key=lambda c: abs(c["decimal"]), reverse=True)
     return out[:limit]
 
 
-def _cap_decompile(code: str | None) -> tuple[str | None, int | None]:
-    """Cap decompiled output at _DECOMPILE_LINE_CAP lines.
+def _cap_decompile(
+    code: str | None,
+    max_lines: int = _DECOMPILE_LINE_CAP_DEFAULT,
+) -> tuple[str | None, int | None, int | None]:
+    """Cap decompiled output. max_lines=0 means no IDA-side truncation (full text).
 
-    Returns (possibly_truncated_code, total_lines_or_None)."""
+    Returns (possibly_truncated_code, total_lines_if_truncated, total_lines)."""
     if code is None:
-        return None, None
+        return None, None, None
     lines = code.split("\n")
     total = len(lines)
-    if total <= _DECOMPILE_LINE_CAP:
-        return code, None
-    truncated = "\n".join(lines[:_DECOMPILE_LINE_CAP])
-    return truncated, total
+    if max_lines == 0:
+        return code, None, total
+    if total <= max_lines:
+        return code, None, total
+    truncated = "\n".join(lines[:max_lines])
+    return truncated, total, total
+
+
+def _callee_target_ea(callee: dict) -> int | None:
+    addr = callee.get("addr")
+    if not isinstance(addr, str):
+        return None
+    try:
+        return int(addr, 16)
+    except ValueError:
+        return None
+
+
+def _internal_callee_eas(ea: int) -> list[int]:
+    """Return resolved internal callee start addresses for a function."""
+    out: list[int] = []
+    seen: set[int] = set()
+    for callee in get_callees(hex(ea)) or []:
+        target = _callee_target_ea(callee)
+        if target is None or target in seen:
+            continue
+        if idaapi.get_func(target) is None:
+            continue
+        seen.add(target)
+        out.append(target)
+    return out
+
+
+def _plan_decompile_tree(
+    root_ea: int,
+    max_depth: int,
+    get_internal_callees: Callable[[int], list[int]],
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]], int]:
+    """BFS call-tree planner. Returns (discovered, edges, deduped_queue_skips)."""
+    if max_depth < 0:
+        max_depth = 0
+
+    discovered: list[tuple[int, int]] = []
+    seen: set[int] = set()
+    edges: list[tuple[int, int]] = []
+    deduped = 0
+    queue: deque[tuple[int, int]] = deque([(root_ea, 0)])
+
+    while queue:
+        ea, node_depth = queue.popleft()
+        if ea in seen:
+            deduped += 1
+            continue
+        seen.add(ea)
+        discovered.append((ea, node_depth))
+
+        if node_depth >= max_depth:
+            continue
+
+        for target in get_internal_callees(ea):
+            edges.append((ea, target))
+            if target not in seen:
+                queue.append((target, node_depth + 1))
+
+    return discovered, edges, deduped
+
+
+def _build_decompile_tree_node(
+    ea: int,
+    depth: int,
+    *,
+    include_asm: bool,
+    max_pseudocode_lines: int,
+) -> DecompileTreeNode:
+    name = idaapi.get_func_name(ea) or ""
+    node: DecompileTreeNode = {"addr": hex(ea), "name": name, "depth": depth}
+    try:
+        raw_code = decompile_function_safe(ea)
+        code, truncated_at, total_lines = _cap_decompile(
+            raw_code, max_pseudocode_lines
+        )
+        node["pseudocode"] = code
+        if total_lines is not None:
+            node["decompile_lines"] = total_lines
+        if truncated_at is not None:
+            node["decompile_truncated"] = truncated_at
+    except Exception:
+        node["pseudocode"] = None
+
+    if include_asm:
+        try:
+            node["assembly"] = get_assembly_lines(ea)
+        except Exception:
+            node["assembly"] = None
+
+    return node
+
+
+def _decompile_tree_internal(
+    root_ea: int,
+    *,
+    depth: int = _DECOMPILE_TREE_MAX_DEPTH_DEFAULT,
+    max_nodes: int = _DECOMPILE_TREE_MAX_NODES_DEFAULT,
+    include_asm: bool = False,
+    max_pseudocode_lines: int = _DECOMPILE_LINE_CAP_DEFAULT,
+) -> DecompileTreeResult:
+    if idaapi.get_func(root_ea) is None:
+        return {"error": f"No function at {hex(root_ea)}"}
+
+    if depth < 0:
+        depth = 0
+    if depth > 10:
+        depth = 10
+    if max_nodes < 1:
+        max_nodes = 1
+    if max_nodes > 200:
+        max_nodes = 200
+
+    discovered, raw_edges, deduped = _plan_decompile_tree(
+        root_ea,
+        depth,
+        _internal_callee_eas,
+    )
+
+    stubs = [hex(ea) for ea, _ in discovered[max_nodes:]]
+
+    nodes: list[DecompileTreeNode] = []
+    for ea, node_depth in discovered[:max_nodes]:
+        nodes.append(
+            _build_decompile_tree_node(
+                ea,
+                node_depth,
+                include_asm=include_asm,
+                max_pseudocode_lines=max_pseudocode_lines,
+            )
+        )
+
+    edges: list[DecompileTreeEdge] = [
+        {"from": hex(src), "to": hex(dst)} for src, dst in raw_edges
+    ]
+
+    return {
+        "root": hex(root_ea),
+        "depth": depth,
+        "nodes": nodes,
+        "edges": edges,
+        "stubs": stubs,
+        "stats": {
+            "decompiled": len(nodes),
+            "stubbed": len(stubs),
+            "deduped": deduped,
+            "total_discovered": len(discovered),
+        },
+    }
 
 
 def _compact_strings(raw: list[dict], limit: int = _TOP_STRINGS) -> list[str]:
@@ -221,7 +477,10 @@ def _compact_callees(raw: list[dict]) -> list[str]:
 
 
 def _analyze_function_internal(
-    ea: int, *, include_asm: bool = False
+    ea: int,
+    *,
+    include_asm: bool = False,
+    max_pseudocode_lines: int = _DECOMPILE_LINE_CAP_DEFAULT,
 ) -> AnalyzeFunctionResult:
     """Compact per-function analysis. Must be called inside an @idasync context."""
     result: AnalyzeFunctionResult = {"addr": hex(ea), "error": None}
@@ -238,10 +497,14 @@ def _analyze_function_internal(
 
         try:
             raw_code = decompile_function_safe(ea)
-            code, total_lines = _cap_decompile(raw_code)
+            code, truncated_at, total_lines = _cap_decompile(
+                raw_code, max_pseudocode_lines
+            )
             result["decompiled"] = code
             if total_lines is not None:
-                result["decompile_truncated"] = total_lines
+                result["decompile_lines"] = total_lines
+            if truncated_at is not None:
+                result["decompile_truncated"] = truncated_at
         except Exception:
             result["decompiled"] = None
 
@@ -276,17 +539,257 @@ def _analyze_function_internal(
 def analyze_function(
     addr: Annotated[str, "Function address or name"],
     include_asm: Annotated[bool, "Include full disassembly (default: false, saves tokens)"] = False,
+    max_pseudocode_lines: Annotated[
+        int,
+        "Pseudocode line cap (default: 600). Set 0 for full text (large outputs cached by server)",
+    ] = _DECOMPILE_LINE_CAP_DEFAULT,
 ) -> AnalyzeFunctionResult:
-    """Compact single-function analysis: pseudocode (capped at 100 lines), top
-    strings, top non-trivial constants, callers, callees, xrefs, comments, and
-    basic block summary. Use this for "tell me everything about function X" in
-    one call instead of chaining decompile + callees + xrefs_to separately."""
+    """Compact single-function analysis in one call: pseudocode, strings,
+    constants, callers, callees, xrefs, comments, and basic block summary.
+
+    Prefer this over chaining decompile + callees + xrefs_to for a single
+    function. For multiple functions, use analyze_batch instead."""
     try:
         ea = _resolve_addr(addr)
     except IDAError as exc:
         return {"addr": addr, "error": str(exc)}
 
-    return _analyze_function_internal(ea, include_asm=include_asm)
+    return _analyze_function_internal(
+        ea,
+        include_asm=include_asm,
+        max_pseudocode_lines=max_pseudocode_lines,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tool — decompile_tree
+# ---------------------------------------------------------------------------
+
+
+@tool
+@idasync
+@tool_timeout(300.0)
+def decompile_tree(
+    addr: Annotated[str, "Root function address or name"],
+    depth: Annotated[int, "Callee recursion depth (default: 2, max: 10)"] = _DECOMPILE_TREE_MAX_DEPTH_DEFAULT,
+    max_nodes: Annotated[int, "Max functions to decompile (default: 30, max: 200)"] = _DECOMPILE_TREE_MAX_NODES_DEFAULT,
+    include_asm: Annotated[bool, "Include disassembly per node (default: false)"] = False,
+    max_pseudocode_lines: Annotated[
+        int,
+        "Pseudocode line cap per node (default: 600). Set 0 for full text",
+    ] = _DECOMPILE_LINE_CAP_DEFAULT,
+) -> DecompileTreeResult:
+    """Decompile a function and its internal callees up to depth N in one call.
+
+    Returns flat nodes + edges (deduped by address). Nodes beyond max_nodes
+    appear in stubs — decompile them individually or rerun with a higher budget.
+
+    Prefer this over calling decompile + callees recursively when exploring
+    a call subtree."""
+    try:
+        root_ea = _resolve_addr(addr)
+    except IDAError as exc:
+        return {"error": str(exc)}
+
+    return _decompile_tree_internal(
+        root_ea,
+        depth=depth,
+        max_nodes=max_nodes,
+        include_asm=include_asm,
+        max_pseudocode_lines=max_pseudocode_lines,
+    )
+
+
+# ---------------------------------------------------------------------------
+# diff_functions — pseudocode + constants diff
+# ---------------------------------------------------------------------------
+
+
+def _constant_decimal_set(raw: list[dict]) -> set[int]:
+    out: set[int] = set()
+    for c in raw:
+        val = c.get("decimal")
+        if isinstance(val, int):
+            out.add(val)
+    return out
+
+
+def _format_constant_set(values: set[int]) -> list[str]:
+    return sorted(hex(v) for v in values)
+
+
+def _diff_constant_sets(raw_a: list[dict], raw_b: list[dict]) -> dict[str, list[str]]:
+    set_a = _constant_decimal_set(raw_a)
+    set_b = _constant_decimal_set(raw_b)
+    return {
+        "only_in_a": _format_constant_set(set_a - set_b),
+        "only_in_b": _format_constant_set(set_b - set_a),
+        "common": _format_constant_set(set_a & set_b),
+    }
+
+
+def _diff_pseudocode(
+    code_a: str | None,
+    code_b: str | None,
+    name_a: str,
+    name_b: str,
+) -> tuple[bool, str]:
+    if code_a is None and code_b is None:
+        return False, ""
+    if code_a is None:
+        code_a = ""
+    if code_b is None:
+        code_b = ""
+    changed = code_a != code_b
+    diff_lines = difflib.unified_diff(
+        code_a.splitlines(keepends=True),
+        code_b.splitlines(keepends=True),
+        fromfile=name_a,
+        tofile=name_b,
+        lineterm="",
+    )
+    return changed, "".join(diff_lines)
+
+
+def _diff_functions_internal(ea_a: int, ea_b: int) -> DiffFunctionsResult:
+    func_a = idaapi.get_func(ea_a)
+    func_b = idaapi.get_func(ea_b)
+    if func_a is None:
+        return {"error": f"No function at {hex(ea_a)}"}
+    if func_b is None:
+        return {"error": f"No function at {hex(ea_b)}"}
+
+    name_a = idaapi.get_func_name(ea_a) or hex(ea_a)
+    name_b = idaapi.get_func_name(ea_b) or hex(ea_b)
+    code_a = decompile_function_safe(ea_a)
+    code_b = decompile_function_safe(ea_b)
+    changed, unified = _diff_pseudocode(code_a, code_b, name_a, name_b)
+
+    return {
+        "addr_a": hex(ea_a),
+        "addr_b": hex(ea_b),
+        "name_a": name_a,
+        "name_b": name_b,
+        "pseudocode_changed": changed,
+        "unified_diff": unified,
+        "constants": _diff_constant_sets(
+            extract_function_constants(ea_a),
+            extract_function_constants(ea_b),
+        ),
+    }
+
+
+@tool
+@idasync
+@tool_timeout(180.0)
+def diff_functions(
+    addr_a: Annotated[str, "First function address or name"],
+    addr_b: Annotated[str, "Second function address or name"],
+) -> DiffFunctionsResult:
+    """Compare two functions by pseudocode unified diff and constant sets.
+
+    Unlike compare_functions (similarity score), this shows line-level
+    pseudocode differences and symmetric constant set changes."""
+    try:
+        ea_a = _resolve_addr(addr_a)
+        ea_b = _resolve_addr(addr_b)
+    except IDAError as exc:
+        return {"error": str(exc)}
+
+    return _diff_functions_internal(ea_a, ea_b)
+
+
+# ---------------------------------------------------------------------------
+# call_path — find call paths between two functions
+# ---------------------------------------------------------------------------
+
+_CALL_PATH_MAX_DEPTH_DEFAULT = 10
+_CALL_PATH_MAX_PATHS_DEFAULT = 20
+
+
+def _find_call_paths(
+    from_ea: int,
+    to_ea: int,
+    max_depth: int,
+    max_paths: int,
+    get_internal_callees: Callable[[int], list[int]],
+) -> list[list[int]]:
+    """BFS enumerate call paths from from_ea to to_ea (internal callees only)."""
+    if max_depth < 1:
+        max_depth = 1
+    if max_paths < 1:
+        max_paths = 1
+
+    paths: list[list[int]] = []
+    queue: deque[list[int]] = deque([[from_ea]])
+
+    while queue and len(paths) < max_paths:
+        path = queue.popleft()
+        current = path[-1]
+        if len(path) > max_depth + 1:
+            continue
+        if current == to_ea and len(path) > 1:
+            paths.append(path)
+            continue
+        if len(path) > max_depth:
+            continue
+        for callee in get_internal_callees(current):
+            if callee in path:
+                continue
+            queue.append(path + [callee])
+
+    return paths
+
+
+def _format_call_path(path: list[int]) -> str:
+    names = []
+    for ea in path:
+        name = idaapi.get_func_name(ea) or hex(ea)
+        names.append(f"{name} ({hex(ea)})")
+    return " -> ".join(names)
+
+
+@tool
+@idasync
+@tool_timeout(120.0)
+def call_path(
+    from_addr: Annotated[str, "Start function address or name"],
+    to_addr: Annotated[str, "Target function address or name"],
+    max_depth: Annotated[int, "Max hops (default: 10, max: 20)"] = _CALL_PATH_MAX_DEPTH_DEFAULT,
+    max_paths: Annotated[int, "Max paths returned (default: 20, max: 50)"] = _CALL_PATH_MAX_PATHS_DEFAULT,
+) -> CallPathResult:
+    """Find call paths from function A to function B over internal calls.
+
+    Returns all paths up to max_depth. Use to distinguish main-path vs
+    init-path reachability."""
+    try:
+        from_ea = _resolve_addr(from_addr)
+        to_ea = _resolve_addr(to_addr)
+    except IDAError as exc:
+        return {"error": str(exc)}
+
+    if idaapi.get_func(from_ea) is None:
+        return {"error": f"No function at {hex(from_ea)}"}
+    if idaapi.get_func(to_ea) is None:
+        return {"error": f"No function at {hex(to_ea)}"}
+
+    if max_depth > 20:
+        max_depth = 20
+    if max_paths > 50:
+        max_paths = 50
+
+    raw_paths = _find_call_paths(
+        from_ea, to_ea, max_depth, max_paths, _internal_callee_eas
+    )
+    hex_paths = [[hex(ea) for ea in path] for path in raw_paths]
+
+    return {
+        "from_addr": hex(from_ea),
+        "to_addr": hex(to_ea),
+        "paths": hex_paths,
+        "path_strings": [_format_call_path(path) for path in raw_paths],
+        "count": len(hex_paths),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +1037,231 @@ def diff_before_after(
         "action_applied": applied,
         "changes_detected": before != after,
     }
+
+
+# ---------------------------------------------------------------------------
+# trace_value — single-function register def-use (Phase 2 MVP)
+# ---------------------------------------------------------------------------
+
+_X86_REG_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("rax", ("rax", "eax", "ax", "al")),
+    ("rbx", ("rbx", "ebx", "bx", "bl")),
+    ("rcx", ("rcx", "ecx", "cx", "cl")),
+    ("rdx", ("rdx", "edx", "dx", "dl")),
+    ("rsi", ("rsi", "esi", "si", "sil")),
+    ("rdi", ("rdi", "edi", "di", "dil")),
+    ("rbp", ("rbp", "ebp", "bp", "bpl")),
+    ("rsp", ("rsp", "esp", "sp", "spl")),
+    ("r8", ("r8", "r8d", "r8w", "r8b")),
+    ("r9", ("r9", "r9d", "r9w", "r9b")),
+    ("r10", ("r10", "r10d", "r10w", "r10b")),
+    ("r11", ("r11", "r11d", "r11w", "r11b")),
+    ("r12", ("r12", "r12d", "r12w", "r12b")),
+    ("r13", ("r13", "r13d", "r13w", "r13b")),
+    ("r14", ("r14", "r14d", "r14w", "r14b")),
+    ("r15", ("r15", "r15d", "r15w", "r15b")),
+)
+
+_REG_DEF_MNEMS = frozenset({
+    "mov", "movzx", "movsx", "movsxd", "lea", "pop", "add", "sub",
+    "and", "or", "xor", "inc", "dec", "not", "neg", "adc", "sbb",
+    "imul", "xadd", "cmpxchg", "shl", "shr", "sar", "rol", "ror",
+    "bswap", "cdqe", "cqo",
+})
+
+
+def _reg_family_for(name: str) -> frozenset[str] | None:
+    n = name.strip().lower()
+    for _canonical, aliases in _X86_REG_FAMILIES:
+        if n in aliases:
+            return frozenset(aliases)
+    return frozenset({n})
+
+
+def _reg_matches(variable: str, reg_name: str | None) -> bool:
+    if not reg_name:
+        return False
+    family = _reg_family_for(variable)
+    return reg_name.strip().lower() in family
+
+
+def _decode_insn_at(ea: int) -> ida_ua.insn_t | None:
+    insn = ida_ua.insn_t()
+    if ida_ua.decode_insn(insn, ea) == 0:
+        return None
+    return insn
+
+
+def _next_head(ea: int, end_ea: int) -> int:
+    return ida_bytes.next_head(ea, end_ea)
+
+
+def _insn_mnem(insn: ida_ua.insn_t) -> str:
+    try:
+        return insn.get_canon_mnem().lower()
+    except Exception:
+        return ""
+
+
+def _operand_reg_name(insn: ida_ua.insn_t, idx: int) -> str | None:
+    op = insn.ops[idx]
+    if op.type == ida_ua.o_void:
+        return None
+    if op.type == ida_ua.o_reg:
+        return idaapi.get_reg_name(op.reg) if op.reg else None
+    return None
+
+
+def _describe_operand_source(insn: ida_ua.insn_t, skip_idx: int) -> str:
+    for i in range(8):
+        if i == skip_idx:
+            continue
+        op = insn.ops[i]
+        if op.type == ida_ua.o_void:
+            break
+        if op.type == ida_ua.o_reg:
+            name = idaapi.get_reg_name(op.reg) if op.reg else "?"
+            return f"reg_{name}"
+        if op.type == ida_ua.o_imm:
+            return f"imm_{hex(op.value)}"
+        if op.type == ida_ua.o_mem:
+            return f"mem_{hex(op.addr)}"
+        if op.type == ida_ua.o_displ:
+            base = idaapi.get_reg_name(op.reg) if op.reg else "?"
+            return f"mem[{base}+{hex(op.addr)}]"
+        if op.type == ida_ua.o_phrase:
+            base = idaapi.get_reg_name(op.reg) if op.reg else "?"
+            index_reg = None
+            if hasattr(op, "specreg") and op.specreg:
+                index_reg = idaapi.get_reg_name(op.specreg)
+            return f"mem[{base}+{index_reg or '?'}*{hex(op.addr)}]"
+    return "unknown"
+
+
+def _is_reg_definition(insn: ida_ua.insn_t, variable: str) -> bool:
+    mnem = _insn_mnem(insn)
+    if mnem not in _REG_DEF_MNEMS:
+        return False
+    dest = _operand_reg_name(insn, 0)
+    if not _reg_matches(variable, dest):
+        return False
+    if mnem == "xor":
+        src = _operand_reg_name(insn, 1)
+        return _reg_matches(variable, src)
+    if mnem in ("inc", "dec", "not", "neg", "bswap", "cdqe", "cqo"):
+        return True
+    if mnem == "pop":
+        return True
+    return True
+
+
+def _classify_reg_use_role(insn: ida_ua.insn_t, variable: str, op_idx: int) -> str:
+    mnem = _insn_mnem(insn)
+    op = insn.ops[op_idx]
+    if op.type in (ida_ua.o_displ, ida_ua.o_phrase):
+        base = idaapi.get_reg_name(op.reg) if op.reg else None
+        if _reg_matches(variable, base):
+            return "pointer_base"
+        index_reg = None
+        if op.type == ida_ua.o_phrase and hasattr(op, "specreg") and op.specreg:
+            index_reg = idaapi.get_reg_name(op.specreg)
+        if _reg_matches(variable, index_reg):
+            return "array_index"
+    if mnem in ("cmp", "test"):
+        return "compare_operand"
+    if mnem == "call":
+        return "call_argument"
+    if mnem == "lea":
+        return "address_operand"
+    return "use"
+
+
+def _trace_value_in_function(
+    func_ea: int,
+    variable: str,
+    direction: str,
+) -> TraceValueResult:
+    func = idaapi.get_func(func_ea)
+    if func is None:
+        return {"error": f"No function at {hex(func_ea)}"}
+
+    definitions: list[TraceValueSite] = []
+    uses: list[TraceValueSite] = []
+
+    ea = func.start_ea
+    while ea < func.end_ea:
+        insn = _decode_insn_at(ea)
+        if insn is None:
+            ea = _next_head(ea, func.end_ea)
+            if ea == idaapi.BADADDR:
+                break
+            continue
+
+        insn_text = idc.GetDisasm(ea) or ""
+        matched_def = False
+
+        if _is_reg_definition(insn, variable):
+            definitions.append({
+                "addr": hex(ea),
+                "insn": insn_text,
+                "source": _describe_operand_source(insn, 0),
+            })
+            matched_def = True
+
+        for i in range(8):
+            if insn.ops[i].type == ida_ua.o_void:
+                break
+            if insn.ops[i].type != ida_ua.o_reg:
+                continue
+            reg_name = _operand_reg_name(insn, i)
+            if not _reg_matches(variable, reg_name):
+                continue
+            if matched_def and i == 0:
+                continue
+            uses.append({
+                "addr": hex(ea),
+                "insn": insn_text,
+                "role": _classify_reg_use_role(insn, variable, i),
+            })
+
+        ea = _next_head(ea, func.end_ea)
+        if ea == idaapi.BADADDR:
+            break
+
+    if direction == "backward":
+        definitions = list(reversed(definitions))
+        uses = list(reversed(uses))
+
+    return {
+        "variable": variable,
+        "function": hex(func.start_ea),
+        "direction": direction,
+        "definitions": definitions,
+        "uses": uses,
+    }
+
+
+@tool
+@idasync
+@tool_timeout(120.0)
+def trace_value(
+    addr: Annotated[str, "Function address or name"],
+    variable: Annotated[str, "Register name to trace (e.g. r13, rax, rdi)"],
+    direction: Annotated[str, "'forward' or 'backward' (default: forward)"] = "forward",
+) -> TraceValueResult:
+    """Trace a register's definitions and uses within a single function.
+
+    Returns instruction-level def-use sites (no cross-function propagation).
+    Prefer over chaining disasm + manual scanning for register semantics."""
+    if direction not in ("forward", "backward"):
+        return {"error": f"direction must be 'forward' or 'backward', got {direction!r}"}
+
+    try:
+        ea = _resolve_addr(addr)
+    except IDAError as exc:
+        return {"error": str(exc)}
+
+    return _trace_value_in_function(ea, variable.strip(), direction)
 
 
 # ---------------------------------------------------------------------------

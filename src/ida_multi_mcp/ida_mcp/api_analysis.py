@@ -1,6 +1,6 @@
-from itertools import islice
+﻿from itertools import islice
 import struct
-from typing import Annotated, Optional
+from typing import Annotated, Optional, TypedDict
 import ida_hexrays
 import ida_lines
 import ida_funcs
@@ -1398,6 +1398,258 @@ def xref_query(
 
 
 # ============================================================================
+# find_writes / find_reads — memory access pattern search
+# ============================================================================
+
+_MEM_OP_TYPES = frozenset({ida_ua.o_mem, ida_ua.o_displ, ida_ua.o_phrase})
+_RMW_MNEMS = frozenset({
+    "add", "sub", "and", "or", "xor", "adc", "sbb", "inc", "dec",
+    "xadd", "cmpxchg", "not", "neg", "btc", "btr", "bts",
+})
+
+
+class MemAccessHit(TypedDict, total=False):
+    addr: str
+    insn: str
+    access: str
+    operand: int
+    base_reg: str | None
+    offset: str | None
+    function: str
+
+
+def _parse_hex_or_int(value: str | int | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    return int(text, 16) if text.startswith("0x") else int(text)
+
+
+def _mem_access_kind(insn: ida_ua.insn_t, op_idx: int) -> str | None:
+    op_type = _operand_type(insn, op_idx)
+    if op_type not in _MEM_OP_TYPES:
+        return None
+    mnem = _insn_mnem(insn)
+    if mnem == "lea":
+        return None
+    if mnem in ("cmp", "test"):
+        return "read"
+    if op_idx == 0:
+        if mnem in _RMW_MNEMS:
+            return "read_write"
+        return "write"
+    if mnem == "xchg":
+        return "read_write"
+    return "read"
+
+
+def _extract_mem_operands(insn: ida_ua.insn_t) -> list[dict]:
+    out: list[dict] = []
+    for i in range(8):
+        if insn.ops[i].type == ida_ua.o_void:
+            break
+        op = insn.ops[i]
+        if op.type == ida_ua.o_mem:
+            out.append({
+                "operand": i,
+                "abs_addr": op.addr,
+                "base_reg": None,
+                "offset": 0,
+            })
+        elif op.type == ida_ua.o_displ:
+            base = idaapi.get_reg_name(op.reg) if op.reg else None
+            out.append({
+                "operand": i,
+                "abs_addr": None,
+                "base_reg": base,
+                "offset": op.addr & 0xFFFFFFFFFFFFFFFF,
+            })
+        elif op.type == ida_ua.o_phrase:
+            base = idaapi.get_reg_name(op.reg) if op.reg else None
+            out.append({
+                "operand": i,
+                "abs_addr": None,
+                "base_reg": base,
+                "offset": op.addr & 0xFFFFFFFFFFFFFFFF,
+            })
+    return out
+
+
+def _mem_target_matches(
+    mem: dict,
+    *,
+    abs_start: int | None,
+    abs_size: int | None,
+    base_reg: str | None,
+    struct_offset: int | None,
+) -> bool:
+    if abs_start is not None:
+        abs_addr = mem.get("abs_addr")
+        if abs_addr is None:
+            return False
+        size = abs_size if abs_size and abs_size > 0 else 1
+        return abs_start <= abs_addr < abs_start + size
+    if base_reg is not None and struct_offset is not None:
+        op_base = mem.get("base_reg")
+        if not op_base:
+            return False
+        return (
+            op_base.lower() == base_reg.strip().lower()
+            and mem.get("offset") == struct_offset
+        )
+    return False
+
+
+def _access_matches_filter(kind: str, want: str) -> bool:
+    if want == "write":
+        return kind in ("write", "read_write")
+    if want == "read":
+        return kind in ("read", "read_write")
+    return False
+
+
+def _find_mem_accesses(
+    want: str,
+    *,
+    addr: str | None = None,
+    size: int | None = None,
+    base_reg: str | None = None,
+    offset: str | int | None = None,
+    in_function: str | None = None,
+    limit: int = 100,
+) -> list[MemAccessHit] | dict:
+    abs_start = _parse_hex_or_int(addr) if addr is not None else None
+    struct_offset = _parse_hex_or_int(offset) if offset is not None else None
+
+    has_abs = abs_start is not None
+    has_struct = base_reg is not None and struct_offset is not None
+    if not has_abs and not has_struct:
+        return {
+            "error": "Specify addr (absolute range) or base_reg + offset (struct field)",
+        }
+    if in_function is None:
+        return {"error": "in_function is required (function address to scan)"}
+
+    if limit <= 0 or limit > 500:
+        limit = 500
+
+    ranges, range_error = _resolve_insn_scan_ranges({"func": in_function}, allow_broad=False)
+    if range_error:
+        return {"error": range_error}
+
+    hits: list[MemAccessHit] = []
+    scanned = 0
+    max_scan = 500_000
+
+    for start_ea, end_ea in ranges:
+        ea = start_ea
+        while ea < end_ea and len(hits) < limit and scanned < max_scan:
+            scanned += 1
+            insn = _decode_insn_at(ea)
+            if insn is None:
+                ea = _next_head(ea, end_ea)
+                if ea == idaapi.BADADDR:
+                    break
+                continue
+
+            func = idaapi.get_func(ea)
+            func_name = idaapi.get_func_name(ea) if func else None
+            insn_text = idc.GetDisasm(ea) or ""
+
+            for mem in _extract_mem_operands(insn):
+                if not _mem_target_matches(
+                    mem,
+                    abs_start=abs_start,
+                    abs_size=size,
+                    base_reg=base_reg,
+                    struct_offset=struct_offset,
+                ):
+                    continue
+                kind = _mem_access_kind(insn, mem["operand"])
+                if kind is None or not _access_matches_filter(kind, want):
+                    continue
+                hits.append({
+                    "addr": hex(ea),
+                    "insn": insn_text,
+                    "access": kind,
+                    "operand": mem["operand"],
+                    "base_reg": mem.get("base_reg"),
+                    "offset": hex(mem["offset"]) if mem.get("offset") is not None else None,
+                    "function": func_name or hex(ea),
+                })
+                if len(hits) >= limit:
+                    break
+
+            ea = _next_head(ea, end_ea)
+            if ea == idaapi.BADADDR:
+                break
+
+    return hits
+
+
+@tool
+@idasync
+@tool_timeout(120.0)
+def find_writes(
+    in_function: Annotated[str, "Function address to scan"],
+    addr: Annotated[str | None, "Absolute memory address start (hex)"] = None,
+    size: Annotated[int | None, "Byte size for absolute range (default: 1)"] = None,
+    base_reg: Annotated[str | None, "Base register for struct offset mode (e.g. rdi)"] = None,
+    offset: Annotated[str | None, "Struct field offset hex (e.g. 0x1C)"] = None,
+    limit: Annotated[int, "Max matches (default: 100, max: 500)"] = 100,
+) -> list[MemAccessHit] | dict:
+    """Find instructions that write to a memory target inside a function.
+
+    Two modes (pick one):
+    - Absolute: addr + optional size
+    - Struct field: base_reg + offset (matches [base+index*scale+disp])
+
+    Prefer over xrefs_to for dynamic [reg+disp] accesses."""
+    return _find_mem_accesses(
+        "write",
+        addr=addr,
+        size=size,
+        base_reg=base_reg,
+        offset=offset,
+        in_function=in_function,
+        limit=limit,
+    )
+
+
+@tool
+@idasync
+@tool_timeout(120.0)
+def find_reads(
+    in_function: Annotated[str, "Function address to scan"],
+    addr: Annotated[str | None, "Absolute memory address start (hex)"] = None,
+    size: Annotated[int | None, "Byte size for absolute range (default: 1)"] = None,
+    base_reg: Annotated[str | None, "Base register for struct offset mode (e.g. rdi)"] = None,
+    offset: Annotated[str | None, "Struct field offset hex (e.g. 0x1C)"] = None,
+    limit: Annotated[int, "Max matches (default: 100, max: 500)"] = 100,
+) -> list[MemAccessHit] | dict:
+    """Find instructions that read from a memory target inside a function.
+
+    Two modes (pick one):
+    - Absolute: addr + optional size
+    - Struct field: base_reg + offset (matches [base+index*scale+disp])
+
+    Prefer over xrefs_to for dynamic [reg+disp] accesses."""
+    return _find_mem_accesses(
+        "read",
+        addr=addr,
+        size=size,
+        base_reg=base_reg,
+        offset=offset,
+        in_function=in_function,
+        limit=limit,
+    )
+
+
+# ============================================================================
 # insn_query — instruction search by mnemonic/operand
 # ============================================================================
 
@@ -1411,7 +1663,9 @@ def insn_query(
 ) -> list[dict]:
     """Search instructions by mnemonic and/or operand values within a function,
     segment, or global scope. Uses existing scan infrastructure.
-    Example: {mnem: 'call', func: '0x401000'} or {mnem: 'syscall'}"""
+
+    Prefer this over py_eval when searching for instruction patterns (e.g.
+    {mnem: 'call', func: '0x401000'} or {mnem: 'syscall'})."""
     queries = normalize_dict_list(queries)
     results = []
 
@@ -1473,10 +1727,16 @@ def analyze_batch(
     include_xrefs: Annotated[bool, "Include xrefs (default: true)"] = True,
     include_strings: Annotated[bool, "Include strings (default: true)"] = True,
     include_callees: Annotated[bool, "Include callees (default: true)"] = True,
+    max_pseudocode_lines: Annotated[
+        int,
+        "Pseudocode line cap per function (default: 600). Set 0 for full text",
+    ] = 600,
 ) -> list[dict]:
-    """Analyze multiple functions in one call. Selectively include decompilation,
-    disassembly, xrefs, strings, and callees per function. More efficient than
-    calling analyze_function N times — single IDA round-trip."""
+    """Analyze multiple functions in one IDA round-trip.
+
+    Use instead of calling analyze_function or decompile repeatedly when you
+    need summaries for N functions. Selectively include decompilation,
+    disassembly, xrefs, strings, and callees per function."""
     addrs = normalize_list_input(addrs)
 
     from .api_composite import _analyze_function_internal
@@ -1485,11 +1745,16 @@ def analyze_batch(
     for addr_str in addrs:
         try:
             ea = parse_address(addr_str)
-            result = _analyze_function_internal(ea, include_asm=include_asm)
+            result = _analyze_function_internal(
+                ea,
+                include_asm=include_asm,
+                max_pseudocode_lines=max_pseudocode_lines,
+            )
 
             if not include_decompile:
                 result.pop("decompiled", None)
                 result.pop("decompile_truncated", None)
+                result.pop("decompile_lines", None)
             if not include_xrefs:
                 result.pop("xrefs", None)
             if not include_strings:

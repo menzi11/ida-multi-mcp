@@ -1,4 +1,4 @@
-from typing import Annotated
+﻿from typing import Annotated, TypedDict
 
 import ida_typeinf
 import ida_hexrays
@@ -6,10 +6,13 @@ import ida_nalt
 import ida_bytes
 import ida_frame
 import ida_ida
+import ida_ua
 import idaapi
+import idautils
+import idc
 
 from .rpc import tool
-from .sync import idasync, ida_major
+from .sync import idasync, ida_major, tool_timeout
 from .utils import (
     normalize_list_input,
     normalize_dict_list,
@@ -583,5 +586,223 @@ def enum_upsert(
             results.append(result_dict)
         except Exception as exc:
             results.append({"name": enum_name, "error": str(exc)})
+
+    return results
+
+
+# ============================================================================
+# struct_infer — aggregate [base+disp] access patterns
+# ============================================================================
+
+_STRUCT_INFER_MAX_FIELDS = 200
+
+_RMW_MNEMS = frozenset({
+    "add", "sub", "and", "or", "xor", "adc", "sbb", "inc", "dec",
+    "xadd", "cmpxchg", "not", "neg",
+})
+
+
+class StructFieldAccess(TypedDict, total=False):
+    offset: str
+    access_count: int
+    reads: int
+    writes: int
+    sample_insn: str
+
+
+class StructInferResult(TypedDict, total=False):
+    function: str
+    base_register: str
+    fields: list[StructFieldAccess]
+    error: str
+
+
+def _decode_insn_at(ea: int) -> ida_ua.insn_t | None:
+    insn = ida_ua.insn_t()
+    if ida_ua.decode_insn(insn, ea) == 0:
+        return None
+    return insn
+
+
+def _next_head(ea: int, end_ea: int) -> int:
+    return ida_bytes.next_head(ea, end_ea)
+
+
+def _insn_mnem(insn: ida_ua.insn_t) -> str:
+    try:
+        return insn.get_canon_mnem().lower()
+    except Exception:
+        return ""
+
+
+def _reg_name_matches(base_register: str, reg_name: str | None) -> bool:
+    if not reg_name:
+        return False
+    return reg_name.strip().lower() == base_register.strip().lower()
+
+
+def _mem_access_kind(insn: ida_ua.insn_t, op_idx: int) -> str | None:
+    op_type = insn.ops[op_idx].type
+    if op_type not in (ida_ua.o_mem, ida_ua.o_displ, ida_ua.o_phrase):
+        return None
+    mnem = _insn_mnem(insn)
+    if mnem == "lea":
+        return None
+    if mnem in ("cmp", "test"):
+        return "read"
+    if op_idx == 0:
+        if mnem in _RMW_MNEMS:
+            return "read_write"
+        return "write"
+    if mnem == "xchg":
+        return "read_write"
+    return "read"
+
+
+def _extract_base_disp_accesses(
+    insn: ida_ua.insn_t,
+    base_register: str,
+) -> list[tuple[int, str]]:
+    """Return (offset, access_kind) pairs for matching base+disp operands."""
+    hits: list[tuple[int, str]] = []
+    for i in range(8):
+        if insn.ops[i].type == ida_ua.o_void:
+            break
+        op = insn.ops[i]
+        if op.type == ida_ua.o_displ:
+            base = idaapi.get_reg_name(op.reg) if op.reg else None
+            if not _reg_name_matches(base_register, base):
+                continue
+            kind = _mem_access_kind(insn, i)
+            if kind:
+                hits.append((op.addr & 0xFFFFFFFFFFFFFFFF, kind))
+        elif op.type == ida_ua.o_phrase:
+            base = idaapi.get_reg_name(op.reg) if op.reg else None
+            if not _reg_name_matches(base_register, base):
+                continue
+            kind = _mem_access_kind(insn, i)
+            if kind:
+                hits.append((op.addr & 0xFFFFFFFFFFFFFFFF, kind))
+    return hits
+
+
+def _infer_struct_fields(
+    func_ea: int,
+    base_register: str,
+    limit: int,
+) -> StructInferResult:
+    func = idaapi.get_func(func_ea)
+    if func is None:
+        return {"error": f"No function at {hex(func_ea)}"}
+
+    if limit <= 0 or limit > _STRUCT_INFER_MAX_FIELDS:
+        limit = _STRUCT_INFER_MAX_FIELDS
+
+    field_stats: dict[int, dict] = {}
+
+    ea = func.start_ea
+    while ea < func.end_ea:
+        insn = _decode_insn_at(ea)
+        if insn is None:
+            ea = _next_head(ea, func.end_ea)
+            if ea == idaapi.BADADDR:
+                break
+            continue
+
+        insn_text = idc.GetDisasm(ea) or ""
+        for offset, kind in _extract_base_disp_accesses(insn, base_register):
+            stats = field_stats.setdefault(offset, {
+                "access_count": 0,
+                "reads": 0,
+                "writes": 0,
+                "sample_insn": insn_text,
+            })
+            stats["access_count"] += 1
+            if kind in ("read", "read_write"):
+                stats["reads"] += 1
+            if kind in ("write", "read_write"):
+                stats["writes"] += 1
+
+        ea = _next_head(ea, func.end_ea)
+        if ea == idaapi.BADADDR:
+            break
+
+    fields: list[StructFieldAccess] = []
+    for offset in sorted(field_stats):
+        stats = field_stats[offset]
+        fields.append({
+            "offset": hex(offset),
+            "access_count": stats["access_count"],
+            "reads": stats["reads"],
+            "writes": stats["writes"],
+            "sample_insn": stats["sample_insn"],
+        })
+        if len(fields) >= limit:
+            break
+
+    return {
+        "function": hex(func.start_ea),
+        "base_register": base_register.strip().lower(),
+        "fields": fields,
+    }
+
+
+@tool
+@idasync
+@tool_timeout(120.0)
+def struct_infer(
+    addr: Annotated[str, "Function address or name"],
+    base_register: Annotated[str, "Struct base register (default: rcx for x64 this)"] = "rcx",
+    limit: Annotated[int, "Max fields returned (default: 200)"] = 200,
+) -> StructInferResult:
+    """Infer struct field offsets from [base+disp] memory access patterns.
+
+    Scans a function for displacements off base_register (e.g. this=rcx)
+    and aggregates read/write counts per offset. Does not apply types."""
+    try:
+        ea = parse_address(addr)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+    return _infer_struct_fields(ea, base_register, limit)
+
+
+# ============================================================================
+# list_enums — enumerate local enums (used by export_session)
+# ============================================================================
+
+
+@tool
+@idasync
+@tool_timeout(60.0)
+def list_enums() -> list[dict]:
+    """List all local enums with member names and values."""
+    results: list[dict] = []
+    try:
+        qty = idc.get_enum_qty()
+    except Exception:
+        qty = 0
+
+    for i in range(qty):
+        try:
+            enum_id = idc.getn_enum(i)
+            if enum_id == idc.BADADDR:
+                continue
+            enum_name = idc.get_enum_name(enum_id) or f"enum_{enum_id}"
+            members: list[dict] = []
+            member_id = idc.get_first_enum_member(enum_id, 0)
+            while member_id != idc.BADADDR:
+                members.append({
+                    "name": idc.get_enum_member_name(member_id) or "",
+                    "value": idc.get_enum_member_value(member_id),
+                })
+                member_id = idc.get_next_enum_member(enum_id, member_id, 0)
+            results.append({
+                "name": enum_name,
+                "member_count": len(members),
+                "members": members,
+            })
+        except Exception:
+            continue
 
     return results

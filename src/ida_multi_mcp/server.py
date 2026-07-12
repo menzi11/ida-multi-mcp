@@ -1,4 +1,4 @@
-"""MCP server for ida-multi-mcp.
+﻿"""MCP server for ida-multi-mcp.
 
 Aggregates tools from multiple IDA instances and routes requests.
 """
@@ -15,7 +15,7 @@ from .registry import InstanceRegistry
 from .router import InstanceRouter
 from .health import cleanup_stale_instances, rediscover_instances
 from .idalib_manager import IdalibManager
-from .tools import management, idalib as idalib_tools, similarity
+from .tools import management, idalib as idalib_tools, similarity, batch, export
 from .cache import get_cache, DEFAULT_MAX_OUTPUT_CHARS
 
 # Static IDA tool schemas (loaded once at import time)
@@ -28,7 +28,7 @@ def _load_static_ida_tools() -> list[dict]:
     global _STATIC_IDA_TOOLS
     if _STATIC_IDA_TOOLS is None:
         try:
-            with open(_STATIC_IDA_TOOLS_PATH, "r") as f:
+            with open(_STATIC_IDA_TOOLS_PATH, "r", encoding="utf-8") as f:
                 _STATIC_IDA_TOOLS = json.load(f)
         except Exception as e:
             print(f"[ida-multi-mcp] Warning: failed to load static tool schemas: {e}",
@@ -123,6 +123,8 @@ class IdaMultiMcpServer:
         idalib_tools.set_manager(self.idalib_manager)
         similarity.set_registry(self.registry)
         similarity.set_router(self.router)
+        batch.set_router(self.router)
+        export.set_router(self.router)
 
         # Register handlers
         self._register_handlers()
@@ -231,6 +233,22 @@ class IdaMultiMcpServer:
                     "content": [{"type": "text", "text": _json_text(result)}],
                     "structuredContent": result,
                     "isError": False,
+                }
+
+            elif name == "batch_query":
+                result = batch.batch_query(arguments)
+                return {
+                    "content": [{"type": "text", "text": _json_text(result)}],
+                    "structuredContent": result,
+                    "isError": "error" in result and "results" not in result,
+                }
+
+            elif name == "export_session":
+                result = export.export_session(arguments)
+                return {
+                    "content": [{"type": "text", "text": _json_text(result)}],
+                    "structuredContent": result,
+                    "isError": "error" in result,
                 }
 
             elif name == "decompile_to_file":
@@ -604,6 +622,10 @@ class IdaMultiMcpServer:
                 "required": []
             }
         }
+
+        self._tool_cache["batch_query"] = batch.BATCH_QUERY_SCHEMA.copy()
+
+        self._tool_cache["export_session"] = export.EXPORT_SESSION_SCHEMA.copy()
 
         self._tool_cache["get_cached_output"] = {
             "name": "get_cached_output",
