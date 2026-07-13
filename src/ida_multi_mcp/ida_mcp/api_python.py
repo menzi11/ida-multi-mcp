@@ -1,4 +1,4 @@
-from typing import Annotated
+﻿from typing import Annotated
 import io
 import sys
 import idaapi
@@ -48,16 +48,21 @@ def py_eval(
         sys.stderr = stderr_capture
 
         # Create execution context with IDA modules (lazy import to avoid errors)
-        def lazy_import(module_name):
-            # Security: only allow IDA-related module imports
+        def lazy_import(module_name, globals=None, locals=None, fromlist=(), level=0):
+            # Security: only allow IDA-related module imports.
+            # Must accept the full __import__ signature — Python calls
+            # __import__(name, globals, locals, fromlist, level) for
+            # statements like ``import a, b, c``.
             allowed_prefixes = ("ida_", "idaapi", "idautils", "idc")
-            if not any(module_name.startswith(p) for p in allowed_prefixes):
+            if not isinstance(module_name, str) or not any(
+                module_name.startswith(p) for p in allowed_prefixes
+            ):
                 raise ImportError(
                     f"Module '{module_name}' is not allowed in py_eval. "
                     "Only IDA modules (ida_*, idaapi, idautils, idc) are permitted."
                 )
             try:
-                return __import__(module_name)
+                return __import__(module_name, globals, locals, fromlist, level)
             except Exception:
                 return None
 
@@ -93,6 +98,7 @@ def py_eval(
             "sum": sum, "zip": zip,
             "callable": callable, "property": property,
             "staticmethod": staticmethod, "classmethod": classmethod,
+            "type": type,
             # Exceptions (needed for try/except)
             "Exception": Exception, "ValueError": ValueError, "TypeError": TypeError,
             "KeyError": KeyError, "IndexError": IndexError, "AttributeError": AttributeError,

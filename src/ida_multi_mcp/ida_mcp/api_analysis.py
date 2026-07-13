@@ -20,6 +20,7 @@ from .rpc import tool
 from .sync import idasync, tool_timeout
 from .utils import (
     parse_address,
+    unwrap_bin_search_result,
     normalize_list_input,
     normalize_dict_list,
     paginate,
@@ -643,8 +644,10 @@ def find_bytes(
             ea = ida_ida.inf_get_min_ea()
             max_ea = ida_ida.inf_get_max_ea()
             while ea != idaapi.BADADDR:
-                ea = ida_bytes.bin_search(
-                    ea, max_ea, compiled, ida_bytes.BIN_SEARCH_FORWARD
+                ea = unwrap_bin_search_result(
+                    ida_bytes.bin_search(
+                        ea, max_ea, compiled, ida_bytes.BIN_SEARCH_FORWARD
+                    )
                 )
                 if ea != idaapi.BADADDR:
                     if skipped < offset:
@@ -653,14 +656,28 @@ def find_bytes(
                         matches.append(hex(ea))
                         if len(matches) >= limit:
                             # Check if there's more
-                            next_ea = ida_bytes.bin_search(
-                                ea + 1, max_ea, compiled, ida_bytes.BIN_SEARCH_FORWARD
+                            next_ea = unwrap_bin_search_result(
+                                ida_bytes.bin_search(
+                                    ea + 1,
+                                    max_ea,
+                                    compiled,
+                                    ida_bytes.BIN_SEARCH_FORWARD,
+                                )
                             )
                             more = next_ea != idaapi.BADADDR
                             break
                     ea += 1
-        except Exception:
-            pass
+        except Exception as e:
+            results.append(
+                {
+                    "pattern": pattern,
+                    "matches": matches,
+                    "n": len(matches),
+                    "cursor": {"done": True},
+                    "error": str(e),
+                }
+            )
+            continue
 
         results.append(
             {
@@ -813,8 +830,10 @@ def find(
                 mask = b"\xFF" * len(pattern_bytes)
                 flags = ida_bytes.BIN_SEARCH_FORWARD | ida_bytes.BIN_SEARCH_NOSHOW
                 while ea != idaapi.BADADDR:
-                    ea = ida_bytes.bin_search(
-                        ea, max_ea, pattern_bytes, mask, len(pattern_bytes), flags
+                    ea = unwrap_bin_search_result(
+                        ida_bytes.bin_search(
+                            ea, max_ea, pattern_bytes, mask, len(pattern_bytes), flags
+                        )
                     )
                     if ea != idaapi.BADADDR:
                         if skipped < offset:
@@ -822,19 +841,30 @@ def find(
                         else:
                             matches.append(hex(ea))
                             if len(matches) >= limit:
-                                next_ea = ida_bytes.bin_search(
-                                    ea + 1,
-                                    max_ea,
-                                    pattern_bytes,
-                                    mask,
-                                    len(pattern_bytes),
-                                    flags,
+                                next_ea = unwrap_bin_search_result(
+                                    ida_bytes.bin_search(
+                                        ea + 1,
+                                        max_ea,
+                                        pattern_bytes,
+                                        mask,
+                                        len(pattern_bytes),
+                                        flags,
+                                    )
                                 )
                                 more = next_ea != idaapi.BADADDR
                                 break
                         ea += 1
-            except Exception:
-                pass
+            except Exception as e:
+                results.append(
+                    {
+                        "query": pattern_str,
+                        "matches": matches,
+                        "count": len(matches),
+                        "cursor": {"done": True},
+                        "error": str(e),
+                    }
+                )
+                continue
 
             results.append(
                 {
@@ -880,8 +910,15 @@ def find(
                     for normalized, size, pattern_bytes in candidates:
                         ea = seg.start_ea
                         while ea != idaapi.BADADDR and ea < seg.end_ea:
-                            ea = ida_bytes.bin_search(
-                                ea, seg.end_ea, pattern_bytes, b"\xFF" * size, size, ida_bytes.BIN_SEARCH_FORWARD
+                            ea = unwrap_bin_search_result(
+                                ida_bytes.bin_search(
+                                    ea,
+                                    seg.end_ea,
+                                    pattern_bytes,
+                                    b"\xFF" * size,
+                                    size,
+                                    ida_bytes.BIN_SEARCH_FORWARD,
+                                )
                             )
                             if ea == idaapi.BADADDR:
                                 break

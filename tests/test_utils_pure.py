@@ -1,4 +1,4 @@
-"""Tests for ida_mcp/utils.py — Pure Python helpers (IDA modules stubbed).
+﻿"""Tests for ida_mcp/utils.py — Pure Python helpers (IDA modules stubbed).
 
 The utils module lives inside ida_multi_mcp.ida_mcp, whose __init__.py
 eagerly imports many IDA-dependent submodules.  We pre-populate sys.modules
@@ -60,6 +60,7 @@ from ida_multi_mcp.ida_mcp.utils import (
     compact_whitespace,
     get_function,
     parse_address,
+    unwrap_bin_search_result,
     normalize_list_input,
     normalize_dict_list,
     looks_like_address,
@@ -72,6 +73,27 @@ import ida_multi_mcp.ida_mcp.utils as utils
 
 utils.idaapi.BADADDR = -1
 utils.idaapi.get_name_ea.side_effect = lambda _badaddr, _name: -1
+
+
+# ---------------------------------------------------------------------------
+# unwrap_bin_search_result (IDA 9.x returns (ea, len))
+# ---------------------------------------------------------------------------
+
+class TestUnwrapBinSearchResult:
+    def test_bare_ea(self):
+        assert unwrap_bin_search_result(0x180530686) == 0x180530686
+
+    def test_ida9_tuple(self):
+        assert unwrap_bin_search_result((0x180530686, 0)) == 0x180530686
+
+    def test_badaddr_passthrough(self):
+        assert unwrap_bin_search_result(-1) == -1
+
+    def test_empty_tuple(self):
+        assert unwrap_bin_search_result(()) == -1
+
+    def test_invalid_payload(self):
+        assert unwrap_bin_search_result("nope") == -1
 
 
 # ---------------------------------------------------------------------------

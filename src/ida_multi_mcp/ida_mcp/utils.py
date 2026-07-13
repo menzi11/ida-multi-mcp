@@ -444,6 +444,22 @@ def get_image_size() -> int:
 _MAX_ADDRESS = 0xFFFFFFFFFFFFFFFF  # 64-bit max
 
 
+def unwrap_bin_search_result(result: Any) -> int:
+    """Normalize ``ida_bytes.bin_search`` return value to an EA.
+
+    IDA 9.x returns ``(ea, matched_length)``; older IDA returns a bare ``ea``.
+    Treat any non-int / nested form that cannot be reduced to an int as BADADDR.
+    """
+    if isinstance(result, tuple):
+        if not result:
+            return idaapi.BADADDR
+        result = result[0]
+    try:
+        return int(result)
+    except (TypeError, ValueError):
+        return idaapi.BADADDR
+
+
 def parse_address(addr: str | int) -> int:
     if isinstance(addr, int):
         result = addr

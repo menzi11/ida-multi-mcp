@@ -125,6 +125,20 @@ class TestParams:
         })
         assert resp["result"]["end"] == "0x1100"
 
+    def test_disasm_start_and_count_aliases(self, rpc):
+        def disasm(addr: str, max_instructions: int = 5000) -> dict:
+            return {"addr": addr, "max_instructions": max_instructions}
+
+        rpc.method(disasm)
+        resp = rpc.dispatch({
+            "jsonrpc": "2.0", "method": "disasm",
+            "params": {"start": "0x180529700", "count": 80}, "id": 1
+        })
+        assert resp["result"] == {
+            "addr": "0x180529700",
+            "max_instructions": 80,
+        }
+
     def test_null_params_no_required(self, rpc):
         """Method with all-optional params should accept null params."""
         # Register a no-args method

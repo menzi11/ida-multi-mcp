@@ -13,6 +13,10 @@ _TOOL_PARAM_ALIASES: dict[str, dict[str, str]] = {
         "stop": "end",
         "start": "addr",
         "start_addr": "addr",
+        "count": "max_instructions",
+        "n": "max_instructions",
+        "num": "max_instructions",
+        "limit": "max_instructions",
     },
 }
 
