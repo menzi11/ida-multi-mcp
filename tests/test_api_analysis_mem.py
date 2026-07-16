@@ -50,9 +50,9 @@ def analysis_mem_helpers(monkeypatch):
 
     utils = types.ModuleType("ida_multi_mcp.ida_mcp.utils")
     for attr in (
-        "parse_address", "normalize_list_input", "normalize_dict_list", "paginate",
+        "parse_address", "unwrap_bin_search_result", "normalize_list_input", "normalize_dict_list", "paginate",
         "get_function", "get_prototype", "get_stack_frame_variables_internal",
-        "decompile_function_safe", "compact_whitespace", "get_assembly_lines",
+        "decompile_function_safe", "decompile_function_result", "compact_whitespace", "get_assembly_lines",
         "safe_get_reg_name", "insn_mnem", "disasm_at",
         "get_all_xrefs", "get_all_comments", "extract_function_strings",
     ):

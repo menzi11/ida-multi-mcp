@@ -1,6 +1,8 @@
 ﻿# MCP Tool Selection Guide
 
-Last updated: 2026-07-16  
+Last updated: 2026-07-16
+
+> Note: `decompile` soft-fails with `asm` fallback on Hex-Rays errors (e.g. `MERR_BADFRAME`).  
 Status: Active  
 Audience: AI agents using ida-multi-mcp
 

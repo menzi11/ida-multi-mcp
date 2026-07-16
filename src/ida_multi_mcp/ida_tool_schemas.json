@@ -1380,13 +1380,17 @@
   },
   {
     "name": "decompile",
-    "description": "Decompile function to pseudocode",
+    "description": "Decompile function to pseudocode.\n\nOn Hex-Rays failure (e.g. MERR_BADFRAME), returns disassembly under `asm`\nwith `fallback='disasm'` and a `warning` — not an empty hard error — so\nagents can continue without retrying the same address.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "addr": {
           "type": "string",
           "description": "Function address to decompile"
+        },
+        "fallback_asm": {
+          "type": "boolean",
+          "description": "If Hex-Rays fails, include disassembly instead of failing empty (default: true)"
         }
       },
       "required": [

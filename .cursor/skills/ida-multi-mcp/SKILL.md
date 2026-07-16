@@ -50,6 +50,10 @@ Adjust the IDA path if Output window shows a different version.
 
 Router returns full tool payloads (no `--- TRUNCATED ---`). For huge functions prefer `max_pseudocode_lines`, `export_session`, or `decompile_to_file` instead of dumping everything into chat.
 
+## Decompile failures
+
+If Hex-Rays cannot decompile (common: `MERR_BADFRAME`), `decompile` returns `asm` + `fallback='disasm'` + `warning` (not empty `error`). Do **not** retry the same address; continue with `asm` / `disasm` / `analyze_function`, or fix the stack frame in IDA.
+
 ## When Cursor Agent lacks new tools
 
 Router may expose ~96 tools while the chat UI caches fewer. Verify with `server_info` / `refresh_tools`. Use Router-backed calls or a new chat if specific tool names fail with "tool not found".

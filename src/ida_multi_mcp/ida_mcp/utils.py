@@ -1094,17 +1094,74 @@ def decompile_checked(addr: int):
     return cfunc
 
 
-def decompile_function_safe(ea: int) -> Optional[str]:
-    """Safely decompile a function, returning None on failure (uses cache)"""
+def _hexrays_merr_name(code: int | None) -> str | None:
+    """Map ida_hexrays.MERR_* numeric code to its constant name."""
+    if code is None:
+        return None
+    for name in (
+        "MERR_OK", "MERR_BLOCK", "MERR_INTERR", "MERR_INSN", "MERR_MEM",
+        "MERR_BADBLK", "MERR_EXTERNAL", "MERR_MAXCND", "MERR_COMPLEX",
+        "MERR_LICENSE", "MERR_OVER", "MERR_HUGESTACK", "MERR_LVARS",
+        "MERR_BITNESS", "MERR_BADCALL", "MERR_BADFRAME", "MERR_UNKTYPE",
+        "MERR_BUSY", "MERR_FARCALL", "MERR_RECDEPTH", "MERR_STOP",
+        "MERR_CANCELED", "MERR_LOOP", "MERR_CLOUD", "MERR_ONLY32", "MERR_ONLY64",
+    ):
+        if hasattr(ida_hexrays, name) and getattr(ida_hexrays, name) == code:
+            return name
+    return f"MERR_{code}"
+
+
+def decompile_function_result(ea: int) -> dict:
+    """Decompile with structured status (never raises).
+
+    Returns keys: code (str|None), error (str|None), hexrays_merr (str|None),
+    hexrays_code (int|None), errea (str|None).
+    """
     import ida_lines
     import ida_kernwin
 
+    out: dict = {
+        "code": None,
+        "error": None,
+        "hexrays_merr": None,
+        "hexrays_code": None,
+        "errea": None,
+    }
     try:
         if not ida_hexrays.init_hexrays_plugin():
-            return None
-        cfunc = ida_hexrays.decompile(ea)
+            out["error"] = "Hex-Rays decompiler is not available"
+            return out
+
+        # Prefer function entry — mid-function EAs often confuse Hex-Rays.
+        func = idaapi.get_func(ea)
+        decompile_ea = func.start_ea if func else ea
+
+        hf = ida_hexrays.hexrays_failure_t()
+        cfunc = ida_hexrays.decompile(decompile_ea, hf)
         if not cfunc:
-            return None
+            merr = getattr(hf, "code", None)
+            out["hexrays_code"] = merr
+            out["hexrays_merr"] = _hexrays_merr_name(merr)
+            if hf.errea != idaapi.BADADDR:
+                out["errea"] = hex(hf.errea)
+            parts = [f"Decompilation failed at {hex(decompile_ea)}"]
+            if out["hexrays_merr"]:
+                parts.append(out["hexrays_merr"])
+            if hf.str:
+                parts.append(str(hf.str))
+            if out["errea"]:
+                parts.append(f"(address: {out['errea']})")
+            out["error"] = ": ".join(parts) if len(parts) > 1 else parts[0]
+            # Human-readable hints for common Hex-Rays failures
+            if out["hexrays_merr"] == "MERR_BADFRAME":
+                out["error"] += (
+                    " — stack frame looks broken; use disasm / fix frame in IDA, "
+                    "or rely on asm fallback from decompile()"
+                )
+            elif out["hexrays_merr"] == "MERR_LICENSE":
+                out["error"] += " — decompiler license unavailable; use disasm"
+            return out
+
         sv = cfunc.get_pseudocode()
         lines = []
         for sl in sv:
@@ -1125,9 +1182,16 @@ def decompile_function_safe(ea: int) -> Optional[str]:
                 lines.append(f"{text} /*{line_ea:#x}*/")
             else:
                 lines.append(text)
-        return "\n".join(lines)
-    except Exception:
-        return None
+        out["code"] = "\n".join(lines)
+        return out
+    except Exception as exc:
+        out["error"] = str(exc)
+        return out
+
+
+def decompile_function_safe(ea: int) -> Optional[str]:
+    """Safely decompile a function, returning None on failure (uses cache)"""
+    return decompile_function_result(ea).get("code")
 
 
 def get_assembly_lines(ea: int) -> str:

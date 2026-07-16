@@ -28,6 +28,7 @@ from .utils import (
     get_prototype,
     get_stack_frame_variables_internal,
     decompile_function_safe,
+    decompile_function_result,
     compact_whitespace,
     get_assembly_lines,
     safe_get_reg_name,
@@ -163,14 +164,41 @@ def _resolve_immediate_insn_start(
 @tool_timeout(90.0)
 def decompile(
     addr: Annotated[str, "Function address to decompile"],
+    fallback_asm: Annotated[
+        bool,
+        "If Hex-Rays fails, include disassembly instead of failing empty (default: true)",
+    ] = True,
 ) -> dict:
-    """Decompile function to pseudocode"""
+    """Decompile function to pseudocode.
+
+    On Hex-Rays failure (e.g. MERR_BADFRAME), returns disassembly under `asm`
+    with `fallback='disasm'` and a `warning` — not an empty hard error — so
+    agents can continue without retrying the same address.
+    """
     try:
         start = parse_address(addr)
-        code = decompile_function_safe(start)
-        if code is None:
-            return {"addr": addr, "code": None, "error": "Decompilation failed"}
-        return {"addr": addr, "code": code}
+        detail = decompile_function_result(start)
+        if detail.get("code"):
+            return {"addr": addr, "code": detail["code"], "error": None}
+
+        result: dict = {
+            "addr": addr,
+            "code": None,
+            "error": detail.get("error") or "Decompilation failed",
+            "hexrays_merr": detail.get("hexrays_merr"),
+            "hexrays_code": detail.get("hexrays_code"),
+            "errea": detail.get("errea"),
+        }
+
+        if fallback_asm:
+            asm = get_assembly_lines(start)
+            if asm:
+                result["asm"] = asm
+                result["fallback"] = "disasm"
+                # Soften for agents: useful payload present → warning, not error
+                result["warning"] = result.pop("error")
+                result["error"] = None
+        return result
     except Exception as e:
         return {"addr": addr, "code": None, "error": str(e)}
 
