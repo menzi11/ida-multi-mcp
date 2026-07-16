@@ -1,4 +1,4 @@
-"""Response cache for large IDA tool outputs.
+﻿"""Response cache for large IDA tool outputs.
 
 Provides in-memory LRU caching with TTL for tool responses that exceed
 the default output limit, enabling pagination via offset/size.
@@ -14,7 +14,17 @@ from typing import Any
 
 
 # Configuration
-DEFAULT_MAX_OUTPUT_CHARS = 10000  # Default truncation limit
+# Router truncates tool text/structured payloads above this size.
+# Override with IDA_MCP_MAX_OUTPUT_CHARS; set to 0 for unlimited (no truncation).
+def _env_max_output_chars() -> int:
+    raw = os.environ.get("IDA_MCP_MAX_OUTPUT_CHARS", "10000").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return 10000
+
+
+DEFAULT_MAX_OUTPUT_CHARS = _env_max_output_chars()
 CACHE_MAX_ENTRIES = 200          # Maximum cached responses
 CACHE_TTL_SECONDS = int(os.environ.get("IDA_MCP_CACHE_TTL", "1800"))  # 30 min default, env override
 

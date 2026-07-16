@@ -1,6 +1,6 @@
 ﻿# MCP Tool Selection Guide
 
-Last updated: 2026-07-12  
+Last updated: 2026-07-16  
 Status: Active  
 Audience: AI agents using ida-multi-mcp
 
@@ -73,13 +73,28 @@ Need several independent reads?
 
 | Tool | Parameter | Default | Tip |
 |------|-----------|---------|-----|
-| `server_info` | _(none)_ | — | Router only; compare `build_id` and `capabilities` after upgrades |
+| `server_info` | _(none)_ | — | Router only; compare `build_id` / `capabilities` / `max_output_chars` |
 | `server_health` | `instance_id` | required | Inspect `build` for IDA plugin version and capability flags |
+| _(any IDA tool)_ | `max_output_chars` | 10000 | Router truncation; **`0` = unlimited** (no `--- TRUNCATED ---`) |
 | `analyze_function` | `max_pseudocode_lines` | 600 | `0` = full text (server may cache) |
 | `analyze_batch` | `max_pseudocode_lines` | 600 | Same as above |
 | `decompile_tree` | `depth` / `max_nodes` | 2 / 30 | Increase `max_nodes` for stubs |
 | `call_path` | `max_depth` / `max_paths` | 10 / 20 | Internal calls only |
 | `export_session` | `named_only` | true | Skips auto `sub_*` names |
+
+### Disable output truncation (Router)
+
+Default Router limit is **10 000 chars**. To turn it off globally, set env on the MCP process:
+
+```json
+"ida-multi-mcp": {
+  "command": "python",
+  "args": ["-m", "ida_multi_mcp"],
+  "env": { "IDA_MCP_MAX_OUTPUT_CHARS": "0" }
+}
+```
+
+Or per call: pass `max_output_chars: 0`. If truncated, use `get_cached_output(cache_id=...)`.
 
 ## Maintenance
 

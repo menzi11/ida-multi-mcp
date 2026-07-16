@@ -82,6 +82,8 @@ def server_info(tool_cache: dict | None = None) -> dict:
     Use this to verify the MCP server process loaded the expected code without
     requiring an IDA instance or plugin reload.
     """
+    from ..cache import DEFAULT_MAX_OUTPUT_CHARS
+
     registry = _get_registry()
     registered = set(tool_cache.keys()) if tool_cache else set()
     uptime = time.time() - _SERVER_START_TIME
@@ -90,6 +92,8 @@ def server_info(tool_cache: dict | None = None) -> dict:
         "tools_registered": len(registered),
         "instances_connected": len(registry.list_instances()),
         "capabilities": version_info.capability_map(registered),
+        # 0 = unlimited (IDA_MCP_MAX_OUTPUT_CHARS / per-call max_output_chars)
+        "max_output_chars": DEFAULT_MAX_OUTPUT_CHARS,
     })
     return payload
 

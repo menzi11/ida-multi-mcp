@@ -53,6 +53,8 @@ class TestServerInfoTool:
         assert result["capabilities"]["batch_query"] is True
         assert result["capabilities"]["trace_value"] is False
         assert result["schema_tools_count"] >= 80
+        assert "max_output_chars" in result
+        assert isinstance(result["max_output_chars"], int)
 
     def test_server_info_json_serializable(self, tmp_path):
         from ida_multi_mcp.registry import InstanceRegistry
