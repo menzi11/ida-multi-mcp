@@ -1,4 +1,4 @@
-# ida-multi-mcp Installation Guide
+﻿# ida-multi-mcp Installation Guide
 
 This guide is for AI agents. Follow each step exactly.
 
@@ -152,20 +152,6 @@ py -3.12 -m pip install -e .
 ```
 
 After any upgrade: **restart Cursor MCP** and **restart IDA**. Confirm with `server_info` (Router) and `server_health` (instance) — `build.build_id` should match.
-
-### Disable large-output truncation (optional)
-
-Router truncates tool responses above 10 000 characters by default. To disable:
-
-```json
-"ida-multi-mcp": {
-  "command": "python",
-  "args": ["-m", "ida_multi_mcp"],
-  "env": { "IDA_MCP_MAX_OUTPUT_CHARS": "0" }
-}
-```
-
-`0` = unlimited. Per-call override: `max_output_chars: 0`. See `docs/ops/mcp-tool-selection.md`.
 
 If IDA is installed in a custom location:
 ```bash

@@ -46,14 +46,9 @@ ida-multi-mcp --install
 
 Adjust the IDA path if Output window shows a different version.
 
-## Output truncation
+## Large outputs
 
-Router truncates large tool results (~10 000 chars by default) with `--- TRUNCATED ---` + `cache_id`.
-
-- **Disable globally:** MCP `env`: `"IDA_MCP_MAX_OUTPUT_CHARS": "0"` then restart Cursor MCP.
-- **Per call:** pass `max_output_chars: 0`.
-- **If truncated:** `get_cached_output(cache_id=...)`.
-- Check current limit via `server_info.max_output_chars` (`0` = unlimited).
+Router returns full tool payloads (no `--- TRUNCATED ---`). For huge functions prefer `max_pseudocode_lines`, `export_session`, or `decompile_to_file` instead of dumping everything into chat.
 
 ## When Cursor Agent lacks new tools
 

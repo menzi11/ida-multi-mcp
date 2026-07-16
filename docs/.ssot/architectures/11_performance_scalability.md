@@ -1,4 +1,4 @@
-# 11. Performance and Scalability
+﻿# 11. Performance and Scalability
 
 ## Governance Alignment
 - Authority order: `docs/.ssot/contracts/*` -> `docs/.ssot/PRD.md` -> `docs/.ssot/decisions/*` -> this document.
@@ -12,7 +12,7 @@
 - JSON serialization and large-response transfers are expensive
 
 ## Mitigations
-- Large-output truncation + cache pagination
+- Prefer `max_pseudocode_lines`, `export_session`, or `decompile_to_file` for huge payloads (Router does not char-truncate)
 - `decompile_to_file` paginates via `list_funcs` (batches of 500)
 - Stale cleanup reduces unnecessary routing
 

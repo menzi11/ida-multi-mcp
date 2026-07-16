@@ -5,18 +5,7 @@ import time
 
 import pytest
 
-from ida_multi_mcp import cache as cache_mod
 from ida_multi_mcp.cache import ResponseCache
-
-
-class TestMaxOutputEnv:
-    def test_env_zero_means_unlimited(self, monkeypatch):
-        monkeypatch.setenv("IDA_MCP_MAX_OUTPUT_CHARS", "0")
-        assert cache_mod._env_max_output_chars() == 0
-
-    def test_env_invalid_falls_back(self, monkeypatch):
-        monkeypatch.setenv("IDA_MCP_MAX_OUTPUT_CHARS", "nope")
-        assert cache_mod._env_max_output_chars() == 10000
 
 
 class TestStore:

@@ -1,4 +1,4 @@
-# 19. Operational Runbook
+﻿# 19. Operational Runbook
 
 ## Governance Alignment
 - Authority order: `docs/.ssot/contracts/*` -> `docs/.ssot/PRD.md` -> `docs/.ssot/decisions/*` -> this document.
@@ -18,7 +18,7 @@
 
 ## Day-2 Operations
 - On tool mismatch, run `refresh_tools`
-- For large responses, paginate via `get_cached_output(cache_id, offset, size)`
+- For large responses, prefer `max_pseudocode_lines` / `export_session` / `decompile_to_file` (Router does not auto-truncate)
 - On instance-mismatch errors, refresh the ID via `list_instances`
 
 ## Incident Response

@@ -1,4 +1,4 @@
-# AGENTS
+﻿# AGENTS
 
 Last updated: 2026-07-16
 
@@ -25,7 +25,7 @@ Last updated: 2026-07-16
 ## 5) MCP Agent Guide
 - Tool selection: `docs/ops/mcp-tool-selection.md`
 - Deployment check: call `server_info` (Router) and `server_health` (per instance); compare `build_id` / `capabilities`.
-- Output truncation: Router default 10 000 chars; set `IDA_MCP_MAX_OUTPUT_CHARS=0` (or per-call `max_output_chars=0`) for unlimited.
+- Router does not char-truncate tool outputs (legacy `max_output_chars` ignored).
 - Project skill (optional): `.cursor/skills/ida-multi-mcp/SKILL.md`
 - External skill mirrors: `AllSkills/skills/ida-multi-mcp/`, `ComfyAI/config/skills/ida-multi-mcp/`
 - Windows: install the package for **both** Router Python and IDA's Python (see `docs/installation.md`).

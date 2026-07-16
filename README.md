@@ -1,4 +1,4 @@
-# ida-multi-mcp
+﻿# ida-multi-mcp
 
 Multi-instance IDA Pro MCP server for simultaneous reverse engineering of multiple binaries through a single MCP endpoint. Supports both GUI instances and headless analysis via idalib (IDA Pro only).
 
@@ -308,7 +308,7 @@ Lists all registered instances with metadata (binary name, path, architecture, p
 Re-discovers tools from IDA instances. Use this if you update the IDA plugin.
 
 ### get_cached_output(cache_id, offset, size)
-Retrieve cached output from a previous tool call that was truncated.
+Retrieve a previously stored cache entry (optional helper; Router no longer auto-truncates tool calls).
 
 ### decompile_to_file(...)
 Decompile functions and save results directly to files on disk. Requires `instance_id`.

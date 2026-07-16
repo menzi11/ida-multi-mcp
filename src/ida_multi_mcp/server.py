@@ -315,8 +315,8 @@ class IdaMultiMcpServer:
                         "isError": True,
                     }
 
-                # Extract max_output_chars if provided (0 = unlimited)
-                max_output = arguments.pop("max_output_chars", DEFAULT_MAX_OUTPUT_CHARS)
+                # Ignore legacy max_output_chars — Router no longer truncates.
+                arguments.pop("max_output_chars", None)
 
                 ida_response = self.router.route_request("tools/call", {
                     "name": name,
@@ -355,33 +355,6 @@ class IdaMultiMcpServer:
                         "content": content,
                         **({"structuredContent": structured} if structured is not None else {}),
                         "isError": True,
-                    }
-
-                # Serialize structured for size checks
-                structured_text = _json_text(structured)
-                total_chars = len(structured_text)
-
-                # Check if truncation needed (max_output=0 means unlimited)
-                if max_output > 0 and total_chars > max_output:
-                    # Cache full response text for humans (get_cached_output)
-                    cache = get_cache()
-                    instance_id = arguments.get("instance_id") or "unknown"
-                    cache_id = cache.store(structured_text, tool_name=name, instance_id=instance_id)
-
-                    preview_structured = _schema_preserving_preview(structured, max_output)
-                    preview_text = _json_text(preview_structured)
-
-                    truncation_notice = (
-                        f"\n\n--- TRUNCATED ---\n"
-                        f"Showing ~{max_output:,} of {total_chars:,} chars ({total_chars - max_output:,} remaining)\n"
-                        f"cache_id: {cache_id}\n"
-                        f"To get more: get_cached_output(cache_id='{cache_id}', offset={max_output})"
-                    )
-
-                    return {
-                        "content": [{"type": "text", "text": preview_text[:max_output] + truncation_notice}],
-                        "structuredContent": preview_structured,
-                        "isError": False,
                     }
 
                 return {

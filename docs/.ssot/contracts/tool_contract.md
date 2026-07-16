@@ -1,7 +1,7 @@
-# Tool Federation Contract
+﻿# Tool Federation Contract
 
-Last updated: 2026-02-17
-Version: v1
+Last updated: 2026-07-16
+Version: v2
 
 ## Authority
 This contract defines the central MCP server's tool schema federation and large-response handling rules.
@@ -11,8 +11,9 @@ This contract defines the central MCP server's tool schema federation and large-
 - For client compatibility, the output schema must be object-compatible.
 
 ## Output Rules
-- Large outputs may be served as preview + cache pagination.
-- Cache retrieval is performed via `get_cached_output` using offset/size.
+- Router proxies return the full IDA tool payload; they do **not** apply character-budget truncation.
+- Legacy `max_output_chars` / `IDA_MCP_MAX_OUTPUT_CHARS` are ignored if present.
+- `get_cached_output` remains available for manually stored cache entries (offset/size pagination).
 
 ## Traceability
 - Tool cache/federation: `src/ida_multi_mcp/server.py`

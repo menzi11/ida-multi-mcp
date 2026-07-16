@@ -150,8 +150,8 @@ class TestDecompileToFile:
 
 
 class TestProxiedTruncation:
-    def test_response_truncation_and_caching(self, server):
-        """When an IDA tool returns huge output, it should be truncated and cached."""
+    def test_large_response_not_truncated(self, server):
+        """Router returns full IDA tool output; max_output_chars is ignored."""
         reg = server.registry
         iid = reg.register(pid=1, port=9999, idb_path="/t.i64",
                            binary_name="t.exe", host="127.0.0.1")
@@ -163,17 +163,20 @@ class TestProxiedTruncation:
             "isError": False,
         }
 
-        with patch.object(server.router, "route_request", return_value=ida_response):
+        with patch.object(server.router, "route_request", return_value=ida_response) as route:
             resp = _call(server, "tools/call", {
                 "name": "some_ida_tool",
                 "arguments": {"instance_id": iid, "max_output_chars": 500},
             })
+            forwarded = route.call_args[0][1]["arguments"]
+            assert "max_output_chars" not in forwarded
 
         result = resp["result"]
         assert result["isError"] is False
+        assert result["structuredContent"] == big_result
         text = result["content"][0]["text"]
-        assert "TRUNCATED" in text
-        assert "cache_id" in text
+        assert "TRUNCATED" not in text
+        assert "x" * 20000 in json.dumps(result["structuredContent"])
 
 
 # ---------------------------------------------------------------------------
