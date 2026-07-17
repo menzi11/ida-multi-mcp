@@ -56,6 +56,10 @@ Default: `decompile` does one **light reanalyze** retry (`retry_reanalyze=true`)
 Closer to manual delete+reanalyze: `retry_reanalyze="recreate"` (may drop local renames/types on that function).  
 Still failing → `asm` + `fallback='disasm'` + `warning`. Check `retry` / `recovered` in the response.
 
+## Runtime / Frida addresses
+
+IDA shows VA under its imagebase. For Frida/ctypes: `runtime = module_base + (ida_va - ida_imagebase)`. Never pass raw `0x180…` as a live pointer.
+
 ## When Cursor Agent lacks new tools
 
 Router may expose ~96 tools while the chat UI caches fewer. Verify with `server_info` / `refresh_tools`. Use Router-backed calls or a new chat if specific tool names fail with "tool not found".
