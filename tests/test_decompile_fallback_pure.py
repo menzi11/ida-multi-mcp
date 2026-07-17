@@ -73,6 +73,8 @@ class TestDecompileFallback:
             "hexrays_merr": "MERR_BADFRAME",
             "hexrays_code": -13,
             "errea": "0x1000",
+            "retry": ["reanalyze"],
+            "recovered": False,
         }
         utils.get_assembly_lines.return_value = "sub_1000 (.text @ 0x1000):\n1000  retn"
 
@@ -83,6 +85,8 @@ class TestDecompileFallback:
         assert out["asm"].startswith("sub_1000")
         assert out["hexrays_merr"] == "MERR_BADFRAME"
         assert "MERR_BADFRAME" in out["warning"]
+        assert out["retry"] == ["reanalyze"]
+        assert out["recovered"] is False
 
     def test_success_returns_code(self, decompile_mod):
         mod, utils = decompile_mod
@@ -92,8 +96,11 @@ class TestDecompileFallback:
             "hexrays_merr": None,
             "hexrays_code": None,
             "errea": None,
+            "retry": ["reanalyze"],
+            "recovered": True,
         }
         out = mod.decompile("0x1000")
         assert out["code"] == "void sub_1000() {}"
         assert out["error"] is None
+        assert out["recovered"] is True
         assert "asm" not in out

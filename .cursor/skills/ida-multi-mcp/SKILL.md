@@ -52,7 +52,9 @@ Router returns full tool payloads (no `--- TRUNCATED ---`). For huge functions p
 
 ## Decompile failures
 
-If Hex-Rays cannot decompile (common: `MERR_BADFRAME`), `decompile` returns `asm` + `fallback='disasm'` + `warning` (not empty `error`). Do **not** retry the same address; continue with `asm` / `disasm` / `analyze_function`, or fix the stack frame in IDA.
+Default: `decompile` does one **light reanalyze** retry (`retry_reanalyze=true`).  
+Closer to manual delete+reanalyze: `retry_reanalyze="recreate"` (may drop local renames/types on that function).  
+Still failing → `asm` + `fallback='disasm'` + `warning`. Check `retry` / `recovered` in the response.
 
 ## When Cursor Agent lacks new tools
 

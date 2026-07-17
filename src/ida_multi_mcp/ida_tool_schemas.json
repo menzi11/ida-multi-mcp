@@ -1380,7 +1380,7 @@
   },
   {
     "name": "decompile",
-    "description": "Decompile function to pseudocode.\n\nOn Hex-Rays failure (e.g. MERR_BADFRAME), returns disassembly under `asm`\nwith `fallback='disasm'` and a `warning` — not an empty hard error — so\nagents can continue without retrying the same address.",
+    "description": "Decompile function to pseudocode.\n\nDefault recovery: one light reanalyze retry. Pass retry_reanalyze='recreate'\nto also rebuild the function (closer to manual delete+reanalyze). On final\nHex-Rays failure, returns asm under fallback='disasm' with a warning.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1391,6 +1391,17 @@
         "fallback_asm": {
           "type": "boolean",
           "description": "If Hex-Rays fails, include disassembly instead of failing empty (default: true)"
+        },
+        "retry_reanalyze": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Recovery after Hex-Rays failure: true/'reanalyze' (default) = light reanalyze+retry; 'recreate' = also delete+recreate function if still failing (may drop local renames/types); false/'off' = no retry"
         }
       },
       "required": [

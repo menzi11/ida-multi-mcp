@@ -1111,12 +1111,115 @@ def _hexrays_merr_name(code: int | None) -> str | None:
     return f"MERR_{code}"
 
 
-def decompile_function_result(ea: int) -> dict:
-    """Decompile with structured status (never raises).
+# Light reanalyze is skipped for these; recreate is never attempted either.
+_NON_RETRYABLE_MERR = frozenset({
+    "MERR_LICENSE",
+    "MERR_ONLY32",
+    "MERR_ONLY64",
+    "MERR_CLOUD",
+})
 
-    Returns keys: code (str|None), error (str|None), hexrays_merr (str|None),
-    hexrays_code (int|None), errea (str|None).
+# del_func + add_func only for frame/analysis corruption class errors.
+_RECREATE_MERR = frozenset({
+    "MERR_BADFRAME",
+    "MERR_BADCALL",
+    "MERR_LVARS",
+    "MERR_BADBLK",
+    "MERR_INSN",
+    "MERR_HUGESTACK",
+    "MERR_UNKTYPE",
+})
+
+
+def _normalize_retry_mode(retry_reanalyze: bool | str) -> str:
+    """Return 'off' | 'reanalyze' | 'recreate'."""
+    if retry_reanalyze is False or retry_reanalyze == 0:
+        return "off"
+    if isinstance(retry_reanalyze, str):
+        key = retry_reanalyze.strip().lower()
+        if key in ("", "0", "false", "off", "none", "no"):
+            return "off"
+        if key in ("recreate", "rebuild", "del_add"):
+            return "recreate"
+        if key in ("1", "true", "on", "yes", "reanalyze", "light"):
+            return "reanalyze"
+        return "reanalyze"
+    return "reanalyze"
+
+
+def _clear_hexrays_cache(ea: int) -> None:
+    try:
+        if hasattr(ida_hexrays, "clear_cached_cfuncs"):
+            ida_hexrays.clear_cached_cfuncs()
+        if hasattr(ida_hexrays, "mark_cfunc_dirty"):
+            ida_hexrays.mark_cfunc_dirty(ea, False)
+    except Exception:
+        pass
+
+
+def _reanalyze_function_light(ea: int) -> bool:
+    """Clear Hex-Rays cache and reanalyze the function (keeps names/types)."""
+    import ida_auto
+
+    func = idaapi.get_func(ea)
+    if not func:
+        return False
+    start = func.start_ea
+    _clear_hexrays_cache(start)
+    try:
+        reanalyze = getattr(idaapi, "reanalyze_function", None)
+        if callable(reanalyze):
+            reanalyze(func)
+        else:
+            ida_auto.plan_and_wait(func.start_ea, func.end_ea)
+    except Exception:
+        try:
+            ida_auto.plan_and_wait(func.start_ea, func.end_ea)
+        except Exception:
+            return False
+    try:
+        ida_auto.auto_wait()
+    except Exception:
+        pass
+    return True
+
+
+def _recreate_function(ea: int) -> bool:
+    """Delete and recreate function at the same bounds (may drop local edits).
+
+    Preserves the function name when it is not an auto ``sub_*`` name.
     """
+    import ida_auto
+    import ida_name
+
+    func = idaapi.get_func(ea)
+    if not func:
+        return False
+    start, end = func.start_ea, func.end_ea
+    old_name = ida_funcs.get_func_name(start) or ""
+    keep_name = bool(old_name) and not old_name.startswith("sub_")
+    _clear_hexrays_cache(start)
+    if not ida_funcs.del_func(start):
+        return False
+    if not ida_funcs.add_func(start, end):
+        # Best-effort restore if recreate failed mid-way
+        ida_funcs.add_func(start, end)
+        return False
+    if keep_name:
+        try:
+            flags = getattr(ida_name, "SN_NOWARN", 0)
+            ida_name.set_name(start, old_name, flags)
+        except Exception:
+            pass
+    try:
+        ida_auto.auto_wait()
+    except Exception:
+        pass
+    return True
+
+
+def _decompile_once(ea: int) -> dict:
+    """Single Hex-Rays attempt with structured status (never raises)."""
     import ida_lines
     import ida_kernwin
 
@@ -1152,11 +1255,11 @@ def decompile_function_result(ea: int) -> dict:
             if out["errea"]:
                 parts.append(f"(address: {out['errea']})")
             out["error"] = ": ".join(parts) if len(parts) > 1 else parts[0]
-            # Human-readable hints for common Hex-Rays failures
             if out["hexrays_merr"] == "MERR_BADFRAME":
                 out["error"] += (
-                    " — stack frame looks broken; use disasm / fix frame in IDA, "
-                    "or rely on asm fallback from decompile()"
+                    " — stack frame looks broken; light reanalyze is tried by default; "
+                    "pass retry_reanalyze='recreate' to delete+recreate the function, "
+                    "or use asm fallback"
                 )
             elif out["hexrays_merr"] == "MERR_LICENSE":
                 out["error"] += " — decompiler license unavailable; use disasm"
@@ -1187,6 +1290,62 @@ def decompile_function_result(ea: int) -> dict:
     except Exception as exc:
         out["error"] = str(exc)
         return out
+
+
+def decompile_function_result(
+    ea: int,
+    retry_reanalyze: bool | str = True,
+) -> dict:
+    """Decompile with structured status and optional recovery (never raises).
+
+    ``retry_reanalyze``:
+      - ``True`` / ``\"reanalyze\"`` (default): clear Hex-Rays cache + reanalyze
+        function once, then retry (keeps names/types).
+      - ``\"recreate\"``: after light retry still fails on recoverable MERR_*,
+        delete+recreate the function at the same bounds (may drop local edits),
+        then retry once more.
+      - ``False`` / ``\"off\"``: no recovery attempts.
+
+    Extra keys: ``retry`` (list of steps tried), ``recovered`` (bool).
+    """
+    mode = _normalize_retry_mode(retry_reanalyze)
+    out = _decompile_once(ea)
+    out["retry"] = []
+    out["recovered"] = False
+
+    if out.get("code"):
+        return out
+
+    merr = out.get("hexrays_merr")
+    if mode == "off" or merr in _NON_RETRYABLE_MERR:
+        return out
+    if out.get("error") == "Hex-Rays decompiler is not available":
+        return out
+
+    steps: list[str] = []
+    if mode in ("reanalyze", "recreate"):
+        if _reanalyze_function_light(ea):
+            steps.append("reanalyze")
+            again = _decompile_once(ea)
+            again["retry"] = list(steps)
+            if again.get("code"):
+                again["recovered"] = True
+                return again
+            out = again
+            out["retry"] = list(steps)
+            out["recovered"] = False
+            merr = out.get("hexrays_merr")
+
+    if mode == "recreate" and merr in _RECREATE_MERR:
+        if _recreate_function(ea):
+            steps.append("recreate_func")
+            again = _decompile_once(ea)
+            again["retry"] = list(steps)
+            again["recovered"] = bool(again.get("code"))
+            return again
+
+    out["retry"] = steps
+    return out
 
 
 def decompile_function_safe(ea: int) -> Optional[str]:

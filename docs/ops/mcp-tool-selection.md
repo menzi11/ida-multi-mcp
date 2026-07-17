@@ -77,6 +77,7 @@ Need several independent reads?
 |------|-----------|---------|-----|
 | `server_info` | _(none)_ | — | Router only; compare `build_id` and `capabilities` after upgrades |
 | `server_health` | `instance_id` | required | Inspect `build` for IDA plugin version and capability flags |
+| `decompile` | `retry_reanalyze` | true | light reanalyze+retry; `"recreate"` = also del+add func; `false` = off |
 | `analyze_function` | `max_pseudocode_lines` | 600 | `0` = full text (prefer for huge funcs if context is tight) |
 | `analyze_batch` | `max_pseudocode_lines` | 600 | Same as above |
 | `decompile_tree` | `depth` / `max_nodes` | 2 / 30 | Increase `max_nodes` for stubs |

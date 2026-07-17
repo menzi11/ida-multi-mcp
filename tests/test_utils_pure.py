@@ -68,6 +68,8 @@ from ida_multi_mcp.ida_mcp.utils import (
     paginate,
     read_bytes_bss_safe,
     read_int_bss_safe,
+    decompile_function_result,
+    _normalize_retry_mode,
 )
 import ida_multi_mcp.ida_mcp.utils as utils
 
@@ -301,3 +303,102 @@ class TestPaginate:
         page = paginate(data, offset=3, count=10)
         assert page["data"] == [3, 4]
         assert page["next_offset"] is None
+
+
+# ---------------------------------------------------------------------------
+# decompile retry_reanalyze orchestration
+# ---------------------------------------------------------------------------
+
+class TestNormalizeRetryMode:
+    def test_defaults_and_aliases(self):
+        assert _normalize_retry_mode(True) == "reanalyze"
+        assert _normalize_retry_mode(False) == "off"
+        assert _normalize_retry_mode("off") == "off"
+        assert _normalize_retry_mode("recreate") == "recreate"
+        assert _normalize_retry_mode("reanalyze") == "reanalyze"
+
+
+class TestDecompileRetryOrchestration:
+    def test_light_reanalyze_recovers(self, monkeypatch):
+        calls = {"n": 0}
+
+        def once(_ea):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {
+                    "code": None,
+                    "error": "fail",
+                    "hexrays_merr": "MERR_BADFRAME",
+                    "hexrays_code": -13,
+                    "errea": "0x1000",
+                }
+            return {
+                "code": "void ok() {}",
+                "error": None,
+                "hexrays_merr": None,
+                "hexrays_code": None,
+                "errea": None,
+            }
+
+        monkeypatch.setattr(utils, "_decompile_once", once)
+        monkeypatch.setattr(utils, "_reanalyze_function_light", lambda _ea: True)
+        monkeypatch.setattr(
+            utils,
+            "_recreate_function",
+            lambda _ea: (_ for _ in ()).throw(AssertionError("recreate should not run")),
+        )
+
+        out = decompile_function_result(0x1000, retry_reanalyze=True)
+        assert out["code"] == "void ok() {}"
+        assert out["recovered"] is True
+        assert out["retry"] == ["reanalyze"]
+        assert calls["n"] == 2
+
+    def test_recreate_only_when_requested(self, monkeypatch):
+        calls = {"recreate": 0}
+
+        def once(_ea):
+            return {
+                "code": None,
+                "error": "fail",
+                "hexrays_merr": "MERR_BADFRAME",
+                "hexrays_code": -13,
+                "errea": "0x1000",
+            }
+
+        monkeypatch.setattr(utils, "_decompile_once", once)
+        monkeypatch.setattr(utils, "_reanalyze_function_light", lambda _ea: True)
+        monkeypatch.setattr(
+            utils,
+            "_recreate_function",
+            lambda _ea: calls.__setitem__("recreate", calls["recreate"] + 1) or True,
+        )
+
+        out_default = decompile_function_result(0x1000, retry_reanalyze=True)
+        assert out_default["retry"] == ["reanalyze"]
+        assert calls["recreate"] == 0
+
+        out_rec = decompile_function_result(0x1000, retry_reanalyze="recreate")
+        assert out_rec["retry"] == ["reanalyze", "recreate_func"]
+        assert calls["recreate"] == 1
+
+    def test_license_skips_retry(self, monkeypatch):
+        monkeypatch.setattr(
+            utils,
+            "_decompile_once",
+            lambda _ea: {
+                "code": None,
+                "error": "license",
+                "hexrays_merr": "MERR_LICENSE",
+                "hexrays_code": -23,
+                "errea": None,
+            },
+        )
+        monkeypatch.setattr(
+            utils,
+            "_reanalyze_function_light",
+            lambda _ea: (_ for _ in ()).throw(AssertionError("no retry")),
+        )
+        out = decompile_function_result(0x1000, retry_reanalyze=True)
+        assert out["retry"] == []
+        assert out["recovered"] is False

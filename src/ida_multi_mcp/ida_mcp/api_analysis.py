@@ -161,25 +161,40 @@ def _resolve_immediate_insn_start(
 
 @tool
 @idasync
-@tool_timeout(90.0)
+@tool_timeout(120.0)
 def decompile(
     addr: Annotated[str, "Function address to decompile"],
     fallback_asm: Annotated[
         bool,
         "If Hex-Rays fails, include disassembly instead of failing empty (default: true)",
     ] = True,
+    retry_reanalyze: Annotated[
+        bool | str,
+        "Recovery after Hex-Rays failure: true/'reanalyze' (default) = light "
+        "reanalyze+retry; 'recreate' = also delete+recreate function if still "
+        "failing (may drop local renames/types); false/'off' = no retry",
+    ] = True,
 ) -> dict:
     """Decompile function to pseudocode.
 
-    On Hex-Rays failure (e.g. MERR_BADFRAME), returns disassembly under `asm`
-    with `fallback='disasm'` and a `warning` — not an empty hard error — so
-    agents can continue without retrying the same address.
+    Default recovery: one light reanalyze retry. Pass retry_reanalyze='recreate'
+    to also rebuild the function (closer to manual delete+reanalyze). On final
+    Hex-Rays failure, returns asm under fallback='disasm' with a warning.
     """
     try:
         start = parse_address(addr)
-        detail = decompile_function_result(start)
+        detail = decompile_function_result(start, retry_reanalyze=retry_reanalyze)
+        meta = {
+            "retry": detail.get("retry") or [],
+            "recovered": bool(detail.get("recovered")),
+        }
         if detail.get("code"):
-            return {"addr": addr, "code": detail["code"], "error": None}
+            return {
+                "addr": addr,
+                "code": detail["code"],
+                "error": None,
+                **meta,
+            }
 
         result: dict = {
             "addr": addr,
@@ -188,6 +203,7 @@ def decompile(
             "hexrays_merr": detail.get("hexrays_merr"),
             "hexrays_code": detail.get("hexrays_code"),
             "errea": detail.get("errea"),
+            **meta,
         }
 
         if fallback_asm:
